@@ -11,6 +11,8 @@ out/
 local.properties
 *.jks
 *.keystore
+# 真实签名配置(示例文件 keystore.properties.example 需保留)
+keystore.properties
 captures/
 .externalNativeBuild/
 .cxx/
