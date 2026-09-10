@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App name -->
+    <string name="app_name">VRCForwarder</string>
+
+    <!-- Config -->
+    <string name="label_pc_ip">PC Receiver IP</string>
+    <string name="label_port">Port</string>
+    <string name="hint_pc_ip">e.g. 192.168.1.100</string>
+
+    <!-- Buttons -->
+    <string name="btn_start">Start Forwarding</string>
+    <string name="btn_stop">Stop Forwarding</string>
+    <string name="btn_scan">Auto-detect PC Receiver</string>
+    <string name="btn_forward">Forward</string>
+    <string name="btn_forward_stop">Stop</string>
+
+    <!-- Status -->
+    <string name="status_idle">1. Plug the UVC camera into this device\'s USB port\n2. Enter the PC IP (or tap Auto-detect)\n3. Tap "Start Forwarding" and allow the system prompt</string>
+    <string name="status_running">Forwarding...</string>
+    <string name="status_starting">Starting forwarding...</string>
+    <string name="title_devices">Connected Cameras</string>
+    <string name="hint_no_device">(No camera detected — plug one in and it appears here)</string>
+    <string name="stat_prefix">[Stats] </string>
+
+    <!-- Device states -->
+    <string name="state_forwarding">● Forwarding</string>
+    <string name="state_idle_device">Idle</string>
+    <string name="state_unauthorized">Unauthorized</string>
+
+    <!-- Messages -->
+    <string name="msg_need_ip">Enter the PC LAN IP first (or tap Auto-detect)</string>
+    <string name="msg_no_camera">No UVC camera found. Plug in a device and retry.\nTip: allow the USB permission dialog when prompted.</string>
+    <string name="msg_cameras_found">Detected %1$d camera(s), authorization needed one by one (%2$d pending). Please allow in the dialogs...</string>
+    <string name="msg_usb_attached">USB device attached</string>
+    <string name="msg_usb_detached">Camera detached — other streams keep forwarding</string>
+    <string name="msg_perm_denied_device">Permission denied: %1$s</string>
+    <string name="msg_perm_denied_some">A camera was denied — skipping it, continuing</string>
+    <string name="msg_setting_up">Setting up forwarding for %1$s...</string>
+    <string name="msg_scanning">Searching for PC receiver on LAN...</string>
+    <string name="msg_pc_found">PC receiver found: %1$s\n(make sure UVCReceiver is running on the PC)</string>
+    <string name="msg_pc_not_found">PC receiver not found.\nStart the receiver on your PC and retry.</string>
+
+    <!-- Notification -->
+    <string name="notify_channel">Video Forwarding</string>
+    <string name="notify_title">VRCForwarder</string>
+    <string name="notify_starting">Starting...</string>
+    <string name="notify_forwarding">Forwarding %1$d stream(s) → %2$s:%3$d</string>
+    <string name="notify_forwarding_stats">Forwarding %1$d · %2$s: %3$s</string>
+
+    <!-- Service broadcasts -->
+    <string name="svc_perm_denied">Permission denied, not attached: %1$s</string>
+    <string name="svc_limit_reached">Stream limit reached (%1$d), cannot attach more cameras</string>
+    <string name="svc_limit_reached_short">Stream limit reached (%1$d)</string>
+    <string name="svc_please_allow">Camera detected — tap "Allow" in the permission dialog to forward</string>
+    <string name="svc_device_offline">Device offline or not a UVC camera: %1$s</string>
+    <string name="svc_already_forwarding">Already forwarding: %1$s</string>
+    <string name="svc_no_permission">No USB permission, cannot forward: %1$s</string>
+    <string name="svc_stopped_device">Stopped: %1$s</string>
+    <string name="svc_not_forwarding">Not currently forwarding: %1$s</string>
+    <string name="svc_joined">%1$s(%2$s): attached and forwarding</string>
+    <string name="svc_detached">Camera detached — other streams keep forwarding</string>
+    <string name="svc_all_stopped">Stopped</string>
+
+    <!-- Kind labels -->
+    <string name="kind_bulk">BULK</string>
+    <string name="kind_iso">ISO</string>
+</resources>

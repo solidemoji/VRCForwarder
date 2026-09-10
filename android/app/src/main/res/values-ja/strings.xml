@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VRCForwarder</string>
+
+    <string name="label_pc_ip">PC受信側 IP</string>
+    <string name="label_port">ポート</string>
+    <string name="hint_pc_ip">例: 192.168.1.100</string>
+
+    <string name="btn_start">転送開始</string>
+    <string name="btn_stop">転送停止</string>
+    <string name="btn_scan">PC受信側を自動検索</string>
+    <string name="btn_forward">転送</string>
+    <string name="btn_forward_stop">停止</string>
+
+    <string name="status_idle">1. UVCカメラを本機のUSBに接続\n2. PCのIPを入力（または自動検索）\n3. 「転送開始」を押し、システムのダイアログで許可</string>
+    <string name="status_running">転送中...</string>
+    <string name="status_starting">転送を開始しています...</string>
+    <string name="title_devices">接続中のカメラ</string>
+    <string name="hint_no_device">（カメラ未検出 — 接続するとここに表示されます）</string>
+    <string name="stat_prefix">[統計] </string>
+
+    <string name="state_forwarding">● 転送中</string>
+    <string name="state_idle_device">待機</string>
+    <string name="state_unauthorized">未許可</string>
+
+    <string name="msg_need_ip">先にPCのLAN IPを入力してください（または「自動検索」）</string>
+    <string name="msg_no_camera">UVCカメラが見つかりません。接続して再試行してください。\nヒント: USB許可のダイアログが出たら「許可」を選んでください。</string>
+    <string name="msg_cameras_found">カメラを %1$d 台検出。1台ずつ許可が必要です（%2$d 台待機中）。ダイアログで許可してください...</string>
+    <string name="msg_usb_attached">USBデバイスを検出</string>
+    <string name="msg_usb_detached">カメラが外れました — 他のストリームは継続します</string>
+    <string name="msg_perm_denied_device">許可が拒否されました: %1$s</string>
+    <string name="msg_perm_denied_some">許可が拒否されたカメラをスキップして続行します</string>
+    <string name="msg_setting_up">%1$s の転送を準備中...</string>
+    <string name="msg_scanning">LAN内のPC受信側を検索中...</string>
+    <string name="msg_pc_found">PC受信側を検出: %1$s\n（PCでUVCReceiverが起動していることを確認してください）</string>
+    <string name="msg_pc_not_found">PC受信側が見つかりません。\nPCで受信側を起動して再試行してください。</string>
+
+    <string name="notify_channel">映像転送</string>
+    <string name="notify_title">VRCForwarder</string>
+    <string name="notify_starting">起動中...</string>
+    <string name="notify_forwarding">%1$d 本を転送中 → %2$s:%3$d</string>
+    <string name="notify_forwarding_stats">%1$d 本を転送中 · %2$s: %3$s</string>
+
+    <string name="svc_perm_denied">許可が拒否され、未接続: %1$s</string>
+    <string name="svc_limit_reached">上限(%1$d)に達し、これ以上接続できません</string>
+    <string name="svc_limit_reached_short">上限(%1$d)に達しました</string>
+    <string name="svc_please_allow">カメラを検出 — 許可ダイアログで「許可」を押してください</string>
+    <string name="svc_device_offline">デバイスがオフラインまたはUVCカメラではありません: %1$s</string>
+    <string name="svc_already_forwarding">既に転送中: %1$s</string>
+    <string name="svc_no_permission">USB権限がなく転送できません: %1$s</string>
+    <string name="svc_stopped_device">停止しました: %1$s</string>
+    <string name="svc_not_forwarding">現在転送していません: %1$s</string>
+    <string name="svc_joined">%1$s(%2$s): 接続して転送中</string>
+    <string name="svc_detached">カメラが外れました — 他のストリームは継続します</string>
+    <string name="svc_all_stopped">停止しました</string>
+
+    <string name="kind_bulk">BULK</string>
+    <string name="kind_iso">ISO</string>
+</resources>

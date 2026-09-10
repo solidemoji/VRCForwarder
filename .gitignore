@@ -1,0 +1,40 @@
+# ---- 构建产物 ----
+build/
+dist/
+out/
+*.apk
+*.aab
+*.zip
+
+# ---- Android / Gradle ----
+.gradle/
+local.properties
+*.jks
+*.keystore
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+*.spec.bak
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.iml
+.kotlin/
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 日志/临时 ----
+*.log
+*.tmp

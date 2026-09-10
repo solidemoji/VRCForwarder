@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VRCForwarder</string>
+
+    <string name="label_pc_ip">IP приёмника на ПК</string>
+    <string name="label_port">Порт</string>
+    <string name="hint_pc_ip">напр. 192.168.1.100</string>
+
+    <string name="btn_start">Начать передачу</string>
+    <string name="btn_stop">Остановить передачу</string>
+    <string name="btn_scan">Найти приёмник на ПК</string>
+    <string name="btn_forward">Передать</string>
+    <string name="btn_forward_stop">Стоп</string>
+
+    <string name="status_idle">1. Подключите UVC-камеру к USB этого устройства\n2. Введите IP ПК (или нажмите «Найти»)\n3. Нажмите «Начать передачу» и разрешите в системном окне</string>
+    <string name="status_running">Передача...</string>
+    <string name="status_starting">Запуск передачи...</string>
+    <string name="title_devices">Подключённые камеры</string>
+    <string name="hint_no_device">(Камера не найдена — подключите, и она появится здесь)</string>
+    <string name="stat_prefix">[Статистика] </string>
+
+    <string name="state_forwarding">● Передача</string>
+    <string name="state_idle_device">Ожидание</string>
+    <string name="state_unauthorized">Нет доступа</string>
+
+    <string name="msg_need_ip">Сначала введите IP ПК в локальной сети (или нажмите «Найти»)</string>
+    <string name="msg_no_camera">UVC-камера не найдена. Подключите устройство и повторите.\nСовет: разрешите доступ к USB в системном окне.</string>
+    <string name="msg_cameras_found">Найдено камер: %1$d, нужно разрешить по очереди (ожидают %2$d). Разрешите в окнах...</string>
+    <string name="msg_usb_attached">USB-устройство подключено</string>
+    <string name="msg_usb_detached">Камера отключена — остальные потоки продолжаются</string>
+    <string name="msg_perm_denied_device">Доступ запрещён: %1$s</string>
+    <string name="msg_perm_denied_some">Для камеры отказано в доступе — пропускаем, продолжаем</string>
+    <string name="msg_setting_up">Настройка передачи для %1$s...</string>
+    <string name="msg_scanning">Поиск приёмника на ПК в локальной сети...</string>
+    <string name="msg_pc_found">Приёмник найден: %1$s\n(убедитесь, что UVCReceiver запущен на ПК)</string>
+    <string name="msg_pc_not_found">Приёмник на ПК не найден.\nЗапустите приёмник на ПК и повторите.</string>
+
+    <string name="notify_channel">Передача видео</string>
+    <string name="notify_title">VRCForwarder</string>
+    <string name="notify_starting">Запуск...</string>
+    <string name="notify_forwarding">Передача %1$d поток(ов) → %2$s:%3$d</string>
+    <string name="notify_forwarding_stats">Передача %1$d · %2$s: %3$s</string>
+
+    <string name="svc_perm_denied">Доступ запрещён, не подключено: %1$s</string>
+    <string name="svc_limit_reached">Достигнут предел (%1$d), больше камер подключить нельзя</string>
+    <string name="svc_limit_reached_short">Достигнут предел (%1$d)</string>
+    <string name="svc_please_allow">Камера обнаружена — нажмите «Разрешить» в окне доступа</string>
+    <string name="svc_device_offline">Устройство offline или не UVC-камера: %1$s</string>
+    <string name="svc_already_forwarding">Уже передаётся: %1$s</string>
+    <string name="svc_no_permission">Нет доступа к USB, передача невозможна: %1$s</string>
+    <string name="svc_stopped_device">Остановлено: %1$s</string>
+    <string name="svc_not_forwarding">Сейчас не передаётся: %1$s</string>
+    <string name="svc_joined">%1$s(%2$s): подключено и передаётся</string>
+    <string name="svc_detached">Камера отключена — остальные потоки продолжаются</string>
+    <string name="svc_all_stopped">Остановлено</string>
+
+    <string name="kind_bulk">BULK</string>
+    <string name="kind_iso">ISO</string>
+</resources>

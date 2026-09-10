@@ -1,0 +1,87 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+android {
+    namespace 'com.example.uvcforwarder'
+    compileSdk {
+        version = release(36) {
+            minorApiLevel = 1
+        }
+    }
+
+    defaultConfig {
+        applicationId "com.example.uvcforwarder"
+        minSdk 28
+        // 刻意保持低 targetSdk（28）：侧载工具 App，避开 Android 10+ 前台服务类型限制，
+        // 使 RECORD_AUDIO 保活 + 后台转发行为与老系统一致；不上架商店，无合规压力。
+        targetSdk 28
+        versionCode 2
+        versionName "2.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // 签名：本地存在 keystore 时使用自签名；开源仓库不含 keystore，
+    // 其他人构建时自动回退到 debug 签名（不影响本地测试安装）。
+    // 如需正式发布，请自备 keystore 并填入 keystore.properties。
+    def ksProps = new Properties()
+    def ksFile = rootProject.file("keystore.properties")
+    def hasKs = ksFile.exists()
+    if (hasKs) {
+        ksProps.load(new FileInputStream(ksFile))
+    }
+
+    signingConfigs {
+        sideLoad {
+            if (hasKs) {
+                storeFile rootProject.file(ksProps['storeFile'])
+                storePassword ksProps['storePassword']
+                keyAlias ksProps['keyAlias']
+                keyPassword ksProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (hasKs) signingConfig signingConfigs.sideLoad
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            if (hasKs) signingConfig signingConfigs.sideLoad
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    // 侧载包不做 lint 阻断（checkReleaseBuilds 关掉可加快构建）
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}
+
+// 侧载签名与 testOnly 处理：
+// debug 变体的 testOnly 标记通过 AndroidManifest.xml 中的
+// android:testOnly="false" 显式关闭（见 src/main/AndroidManifest.xml），
+// 使 debug/release 包都能直接侧载，无需 adb install -t。
+
+dependencies {
+    implementation libs.appcompat
+    implementation libs.material
+    implementation libs.activity
+    implementation libs.constraintlayout
+    // 标准免驱 UVC 摄像头(ISO 等时传输)支持：AndroidUSBCamera 2.3.4
+    // aar 内含 saki UVCCamera Java 层 + arm64/armv7/x86 .so；其传递依赖
+    // com.serenegiant:common:4.1.1 由 saki libcommon raw 仓库提供（勿 exclude！）
+    implementation 'com.github.jiangdongguo:AndroidUSBCamera:2.3.4'
+    testImplementation libs.junit
+    androidTestImplementation libs.ext.junit
+    androidTestImplementation libs.espresso.core
+}

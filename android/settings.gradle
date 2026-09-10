@@ -1,0 +1,30 @@
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        // AndroidUSBCamera(含 saki UVCCamera 完整 Java+native) 由此解析
+        maven { url 'https://jitpack.io' }
+        // saki libcommon 仓库：AndroidUSBCamera 传递依赖 com.serenegiant:common:4.1.1
+        maven { url 'https://raw.githubusercontent.com/saki4510t/libcommon/master/repository/' }
+    }
+}
+
+rootProject.name = "UVCForwarder"
+include ':app'

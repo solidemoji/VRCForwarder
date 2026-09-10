@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式下的自适应色 -->
+    <color name="accent">#FFFF9A4D</color>
+
+    <color name="card_bg">#FF23262E</color>
+    <color name="card_stroke">#FF343945</color>
+    <color name="field_bg">#FF1C1F26</color>
+    <color name="field_stroke">#FF3A4150</color>
+    <color name="text_primary">#FFEDEFF2</color>
+    <color name="text_secondary">#FFA6ADBA</color>
+</resources>

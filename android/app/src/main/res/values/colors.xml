@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="accent">#FFFF7A1A</color>
+
+    <!-- 卡片与输入框(浅色模式) -->
+    <color name="card_bg">#FFFFFFFF</color>
+    <color name="card_stroke">#FFE0E4EA</color>
+    <color name="field_bg">#FFF5F7FA</color>
+    <color name="field_stroke">#FFD5DBE3</color>
+    <color name="text_primary">#FF1F2430</color>
+    <color name="text_secondary">#FF6B7280</color>
+</resources>

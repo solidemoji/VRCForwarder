@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VRCForwarder</string>
+
+    <string name="label_pc_ip">PC 接收端 IP</string>
+    <string name="label_port">端口</string>
+    <string name="hint_pc_ip">例如 192.168.1.100</string>
+
+    <string name="btn_start">开始转发</string>
+    <string name="btn_stop">停止转发</string>
+    <string name="btn_scan">自动搜索 PC 接收端</string>
+    <string name="btn_forward">转发</string>
+    <string name="btn_forward_stop">停止</string>
+
+    <string name="status_idle">1. 将 UVC 摄像头插入本机 USB 口\n2. 填写 PC 的 IP（或点自动搜索）\n3. 点「开始转发」，系统弹窗请选允许</string>
+    <string name="status_running">转发运行中...</string>
+    <string name="status_starting">正在启动转发...</string>
+    <string name="title_devices">已连接摄像头</string>
+    <string name="hint_no_device">（未检测到摄像头，插入后自动出现在这里）</string>
+    <string name="stat_prefix">[统计] </string>
+
+    <string name="state_forwarding">● 转发中</string>
+    <string name="state_idle_device">空闲</string>
+    <string name="state_unauthorized">未授权</string>
+
+    <string name="msg_need_ip">请先填写 PC 的局域网 IP（或点「自动搜索」）</string>
+    <string name="msg_no_camera">未找到 UVC 摄像头。请插入设备后重试。\n提示：插上后如系统弹出 USB 授权，请选择允许。</string>
+    <string name="msg_cameras_found">检测到 %1$d 个摄像头，需逐个授权（%2$d 个待授权），请在弹窗中选允许...</string>
+    <string name="msg_usb_attached">检测到 USB 设备插入</string>
+    <string name="msg_usb_detached">检测到摄像头拔出，其余路继续转发</string>
+    <string name="msg_perm_denied_device">设备被拒绝授权: %1$s</string>
+    <string name="msg_perm_denied_some">有摄像头被拒绝授权，跳过该路继续</string>
+    <string name="msg_setting_up">正在为 %1$s 建立转发...</string>
+    <string name="msg_scanning">正在搜索局域网内的 PC 接收端...</string>
+    <string name="msg_pc_found">已找到 PC 接收端: %1$s\n（请确认 PC 上 UVCReceiver 正在运行）</string>
+    <string name="msg_pc_not_found">未发现 PC 接收端。\n请先在 PC 上运行接收端，再重试。</string>
+
+    <string name="notify_channel">视频转发</string>
+    <string name="notify_title">VRCForwarder</string>
+    <string name="notify_starting">正在启动...</string>
+    <string name="notify_forwarding">转发中 %1$d 路 → %2$s:%3$d</string>
+    <string name="notify_forwarding_stats">转发中 %1$d 路 · %2$s: %3$s</string>
+
+    <string name="svc_perm_denied">设备授权被拒绝，未接入: %1$s</string>
+    <string name="svc_limit_reached">路数已达上限(%1$d)，无法接入更多摄像头</string>
+    <string name="svc_limit_reached_short">路数已达上限(%1$d)</string>
+    <string name="svc_please_allow">检测到摄像头，请在授权弹窗中点「允许」以自动转发</string>
+    <string name="svc_device_offline">设备不在线或非 UVC 摄像头: %1$s</string>
+    <string name="svc_already_forwarding">该设备已在转发中: %1$s</string>
+    <string name="svc_no_permission">设备未授权 USB 权限，无法转发: %1$s</string>
+    <string name="svc_stopped_device">已停止转发: %1$s</string>
+    <string name="svc_not_forwarding">该设备当前未在转发: %1$s</string>
+    <string name="svc_joined">%1$s(%2$s): 已接入并转发</string>
+    <string name="svc_detached">摄像头已拔出，其余路继续转发</string>
+    <string name="svc_all_stopped">已停止</string>
+
+    <string name="kind_bulk">BULK</string>
+    <string name="kind_iso">ISO</string>
+</resources>
