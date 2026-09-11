@@ -50,13 +50,29 @@ VRCForwarder/
 
 ## 快速开始
 
-### 1. 安装安卓端
+### 1. 安装安卓端（APK 侧载）
 
-下载 [Releases](../../releases) 中的 `VRCForwarder.apk`，安装到手机 / VR 一体机。
+下载 [Releases](../../releases) 中的 `VRCForwarder.apk`，**通过侧载方式安装到手机 / VR 头显**。
 
-> 首次安装若提示"未知来源"，请在系统设置中允许；
-> 若通过 adb 安装遇到 `INSTALL_FAILED_TEST_ONLY`，说明你拿到的是调试包，
-> 本项目正式包已在 manifest 中显式设置 `android:testOnly="false"`，可直接安装。
+> 本 App 不在任何应用商店上架，只能侧载安装，因此**需要先在头显上开启开发者模式**。
+
+**通用前提：开启开发者模式**
+
+在头显的配套手机 App 中（Pico：PICO 应用 / Quest：Meta Horizon）进入设备设置，
+连续点击版本号或直接开启「开发者模式」，然后在头显内 **设置 → 开发者** 中打开 **USB 调试**。
+
+| 设备 | 推荐侧载方式 |
+|---|---|
+| **Pico（4 / 4 Ultra / Neo 等）** | 用 USB 连接后开启** USB 调试模式**，将 APK 传输到头显**根目录**，再在头显内的文件管理器中点击安装 |
+| **Quest（2 / 3 / Pro 等）** | 使用 [SideQuest](https://sidequestvr.com/) 等第三方工具安装，或同样通过 adb 侧载 |
+
+完整的侧载操作步骤（驱动安装、adb 授权、文件管理器选择等）各机型略有差异，
+**此处不再赘述，有需要请自行查阅对应机型的教程**。
+
+> 补充说明：
+> - 也可用 adb 安装：`adb install -r VRCForwarder.apk`
+> - 本项目正式包已在 manifest 中显式设置 `android:testOnly="false"`，
+>   若你遇到 `INSTALL_FAILED_TEST_ONLY`，说明拿到的是调试构建，加 `-t` 参数即可。
 
 ### 2. 运行 PC 端
 
@@ -152,6 +168,14 @@ A: 浏览器先打开 `http://127.0.0.1:8080` 确认桥正常出图；再确认�
 
 **Q: 端口 5000 被占用？**
 A: 接收端会明确报错而非静默失败，请关闭其它接收端实例（含旧版本）。
+
+**Q: 头显里找不到装好的 App？**
+A: 侧载安装的第三方 App 通常不会出现在主界面的应用列表中，请到
+「**库 / 未知来源 / 全部应用**」分类下查找（各机型叫法不同）。
+
+**Q: 安装时报 `INSTALL_FAILED_TEST_ONLY`？**
+A: 该包是带 `testOnly` 标记的调试构建。本项目 Release 中的正式包已关闭该标记，
+可直接安装；若你自行构建 debug 包，用 `adb install -t` 安装即可。
 
 ## 许可
 
