@@ -4,10 +4,22 @@
 
 ## 快速使用
 
-**方式 A：免安装（推荐）**
-下载 [Releases](../../../releases) 里的 `VRCReceiver-win64.zip` → 解压 → 双击 `VRCReceiver.exe`。
+**方式 A：安装包（推荐，免安装 Python）**
 
-**方式 B：源码运行**
+下载 [Releases](../../../releases) 里的 `VRCReceiver-Setup-x.y.z.exe`，双击运行，
+按向导选择安装位置即可。安装包提供：
+
+- **自选安装目录**（向导里可改）
+- **桌面快捷方式**（可选，默认创建）
+- **开始菜单项**（含卸载入口）
+- **开机自启**（可选，接收端常驻时勾选）
+
+**方式 B：绿色版 zip**
+
+下载 `VRCReceiver-win64.zip`，解压到任意位置，双击 `VRCReceiver.exe`。
+（exe 依赖同目录的 `_internal`，**必须整个文件夹一起解压**）
+
+**方式 C：源码运行**
 ```bash
 pip install pyside6 numpy          # 开发用 opencv-python；打包版用 cv2_shim(Pillow) 替代
 python vrc_receiver.py

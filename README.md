@@ -76,12 +76,20 @@ VRCForwarder/
 
 ### 2. 运行 PC 端
 
-**方式 A（推荐，免装 Python）**：下载 Releases 中的 `VRCReceiver-win64.zip`，解压后双击 `VRCReceiver.exe`。
+**方式 A（推荐）：安装包**
 
-**方式 B（源码运行）**：
+下载 Releases 中的 `VRCReceiver-Setup-x.y.z.exe`，双击按向导安装 —— **可自选安装位置**，
+并可选创建桌面快捷方式、开始菜单项与开机自启（常驻接收时用）。无需安装 Python。
+
+**方式 B：绿色版 zip**
+
+下载 Releases 中的 `VRCReceiver-win64.zip`，解压到任意目录后双击 `VRCReceiver.exe`。
+（exe 依赖同目录的 `_internal`，**必须整个文件夹一起解压**）
+
+**方式 C：源码运行**
 ```bash
 cd pc
-pip install pyside6 numpy opencv-python        # 可选: pyvirtualcam（虚拟摄像头）
+pip install pyside6 numpy            # 可选: pyvirtualcam（虚拟摄像头）
 python vrc_receiver.py
 ```
 
@@ -165,6 +173,12 @@ A: 依次检查：① 手机/一体机与 PC 是否在同一 5GHz WiFi；② 多
 
 **Q: 为什么目标软件收不到画面？**
 A: 浏览器先打开 `http://127.0.0.1:8080` 确认桥正常出图；再确认填的是面板上复制的完整地址。
+
+**Q: PC 端该用安装包还是绿色版 zip？**
+A: 两者功能完全相同。**安装包**（`VRCReceiver-Setup-x.y.z.exe`）适合长期使用 ——
+可自选安装目录、自动创建快捷方式、支持开机自启、可在「应用和功能」里正常卸载；
+**绿色版 zip** 适合不想安装、或想放 U 盘/移动硬盘随插随用（注意整个文件夹一起解压）。
+卸载安装版时会移除程序文件，不会删除你的任何配置（配置存在程序目录内）。
 
 **Q: 端口 5000 被占用？**
 A: 接收端会明确报错而非静默失败，请关闭其它接收端实例（含旧版本）。

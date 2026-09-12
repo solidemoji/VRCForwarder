@@ -40,3 +40,6 @@ desktop.ini
 # ---- 鏃ュ織/涓存椂 ----
 *.log
 *.tmp
+
+# 安装包产物 (由 ISCC 生成)
+installer/Output/
