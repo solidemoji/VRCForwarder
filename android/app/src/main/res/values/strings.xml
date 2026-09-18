@@ -63,6 +63,12 @@
     <string name="svc_all_stopped">Stopped</string>
 
     <!-- Kind labels -->
+    <!-- Version & Help -->
+    <string name="version_format">v%1$s</string>
+    <string name="title_help">How to Use</string>
+    <string name="help_body">1. Install <b>VRCReceiver</b> on your PC and start it (the PC shows a bridge address).\n2. Plug the UVC camera into the headset / phone USB port (for multiple cameras use a powered USB hub).\n3. Enter the PC LAN IP below, or tap "Auto-detect PC Receiver".\n4. Tap "Start Forwarding" and tap Allow on the USB permission dialog.\n5. On the PC, copy the stream address shown on the panel into your face/eye-tracking software (e.g. Baballonia, OpenCV-based tools).\n\nNotes:\n• Keep the headset and PC on the same 5GHz Wi-Fi.\n• Forwarding stops if you exit the app — a persistent notification is shown while running.\n• Multiple cameras can be forwarded at once (up to 6) and unplugged devices recover automatically.\n\n<b>Quest users:</b> if a system dialog asks which app to open the USB camera with (a virtual-screen / media app choice), you can choose <b>Don\'t allow</b>. If it keeps popping up, just close it — it does not affect this app.</string>
+    <string name="about_body">VRCForwarder — forward USB UVC cameras (eye/face tracking) from a VR headset or Android phone to a PC over Wi-Fi.\nOpen source (MIT) — free for any use including commercial, attribution required.</string>
+
     <string name="kind_bulk">BULK</string>
     <string name="kind_iso">ISO</string>
 </resources>

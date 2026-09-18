@@ -21,8 +21,11 @@ android {
         // 0.0.3: ★ Quest 上外接 UVC 摄像头的关键修复 —— 补 horizonos.permission.USB_CAMERA
         //        （该权限是 Quest 打开 UVC 设备的唯一门禁，缺失时 openDevice 必抛 SecurityException）
         //        并移除 device_filter 声明（避免系统不弹权限框）；Pico/手机不受影响
-        versionCode 5
-        versionName "0.0.3"
+        // 0.0.4: 文档/文案更新 —— 五语言「使用方法」补 Quest 系统弹窗提示
+        //        （插 USB 设备时若弹出「用哪个应用打开」/虚拟屏选择，可点「不允许」，
+        //         反复弹出直接关闭即可，不影响本 App）；README/Release 说明同步
+        versionCode 6
+        versionName "0.0.4"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -54,6 +54,11 @@
     <string name="svc_detached">카메라 분리됨 — 나머지 스트림은 계속됩니다</string>
     <string name="svc_all_stopped">중지됨</string>
 
+    <string name="version_format">v%1$s</string>
+    <string name="title_help">사용 방법</string>
+    <string name="help_body">1. PC 에 <b>VRCReceiver</b> 를 설치하고 실행합니다 (스트림 주소가 표시됩니다).\n2. UVC 카메라를 헤드셋 / 스마트폰 USB 포트에 연결합니다 (여러 개일 경우 외부 전원 USB 허브 사용).\n3. 아래 입력란에 PC 의 LAN IP 를 입력하거나 "PC 수신기 자동 검색"을 누릅니다.\n4. "전송 시작"을 누르고 USB 권한 창에서 "허용"을 선택합니다.\n5. PC 에서 패널에 표시된 주소를 얼굴/눈 추적 소프트웨어(예: Baballonia) 에 붙여넣습니다.\n\n참고:\n• 헤드셋과 PC 를 동일한 5GHz Wi-Fi 에 연결하세요.\n• 앱을 종료하면 전송이 중지됩니다 (실행 중에는 상시 알림이 표시됩니다).\n• 최대 6 대까지 동시 전송 가능하며, 분리 후 자동 복구됩니다.\n\n<b>Quest 사용자:</b> USB 카메라를 어떤 앱으로 열지 묻는 시스템 창(가상 화면 / 미디어 앱 선택)이 표시되면 "허용 안 함"을 선택해도 됩니다. 계속 표시되면 닫기만 하세요. 본 앱 동작에는 영향이 없습니다.</string>
+    <string name="about_body">VRCForwarder — VR 헤드셋 / Android 폰의 USB UVC 카메라(눈/얼굴 추적)를 Wi-Fi 로 PC 에 전송합니다.\n오픈 소스(MIT) — 상업적 사용 포함 자유 이용 가능, 출처 표기 필요.</string>
+
     <string name="kind_bulk">BULK</string>
     <string name="kind_iso">ISO</string>
 </resources>
