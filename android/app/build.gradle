@@ -16,41 +16,35 @@ android {
         // 刻意保持低 targetSdk（28）：侧载工具 App，避开 Android 10+ 前台服务类型限制，
         // 使 RECORD_AUDIO 保活 + 后台转发行为与老系统一致；不上架商店，无合规压力。
         targetSdk 28
-        versionCode 2
-        versionName "2.0"
+        // 0.x 版本号：功能可日常使用，但仍在迭代
+        // 0.0.2: 修复 Quest (Horizon OS) 上 2D 面板无法创建导致启动被静默拒绝的问题
+        // 0.0.3: ★ Quest 上外接 UVC 摄像头的关键修复 —— 补 horizonos.permission.USB_CAMERA
+        //        （该权限是 Quest 打开 UVC 设备的唯一门禁，缺失时 openDevice 必抛 SecurityException）
+        //        并移除 device_filter 声明（避免系统不弹权限框）；Pico/手机不受影响
+        versionCode 5
+        versionName "0.0.3"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // 签名：本地存在 keystore 时使用自签名；开源仓库不含 keystore，
-    // 其他人构建时自动回退到 debug 签名（不影响本地测试安装）。
-    // 如需正式发布，请自备 keystore 并填入 keystore.properties。
-    def ksProps = new Properties()
-    def ksFile = rootProject.file("keystore.properties")
-    def hasKs = ksFile.exists()
-    if (hasKs) {
-        ksProps.load(new FileInputStream(ksFile))
-    }
-
+    // 侧载自签名（本机自用，非商店发布）：长期有效 30 年
     signingConfigs {
         sideLoad {
-            if (hasKs) {
-                storeFile rootProject.file(ksProps['storeFile'])
-                storePassword ksProps['storePassword']
-                keyAlias ksProps['keyAlias']
-                keyPassword ksProps['keyPassword']
-            }
+            storeFile file('../uvcforwarder.jks')
+            storePassword 'uvcforwarder'
+            keyAlias 'uvcforwarder'
+            keyPassword 'uvcforwarder'
         }
     }
 
     buildTypes {
         debug {
-            if (hasKs) signingConfig signingConfigs.sideLoad
+            signingConfig signingConfigs.sideLoad
         }
         release {
             minifyEnabled false
             shrinkResources false
-            if (hasKs) signingConfig signingConfigs.sideLoad
+            signingConfig signingConfigs.sideLoad
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -59,6 +53,11 @@ android {
     lint {
         abortOnError false
         checkReleaseBuilds false
+    }
+
+    // 生成 BuildConfig（AGP 8+ 默认关闭）——App 内显示版本号用
+    buildFeatures {
+        buildConfig true
     }
 
     compileOptions {

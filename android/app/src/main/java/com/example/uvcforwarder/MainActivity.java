@@ -127,6 +127,10 @@ public class MainActivity extends AppCompatActivity {
         btnScan = findViewById(R.id.btn_scan);
         deviceList = findViewById(R.id.device_list);
 
+        // 版本号：从 build.gradle 的 versionName 读取（发布/排障时可见）
+        TextView tvVersion = findViewById(R.id.tv_version);
+        tvVersion.setText(getString(R.string.version_format, BuildConfig.VERSION_NAME));
+
         SharedPreferences sp = getSharedPreferences(PREF, MODE_PRIVATE);
         etIp.setText(sp.getString("ip", ""));
         etPort.setText(String.valueOf(sp.getInt("port", UvcProto.NET_PORT_DEFAULT)));
@@ -221,10 +225,32 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void ensurePermissionsThenStart() {
-        String[] needed = new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO};
+        // ★ USB_CAMERA = Quest (Horizon OS) 外接 UVC 的唯一门禁（dangerous 级，需运行时请求）。
+        // 非 Quest 设备上该权限不存在，checkSelfPermission 会返回 DENIED，
+        // 因此用 try/catch 兼容：拿不到权限名时退化为原有两项，不影响 Pico/手机。
+        java.util.List<String> list = new java.util.ArrayList<>();
+        list.add(Manifest.permission.CAMERA);
+        list.add(Manifest.permission.RECORD_AUDIO);
+        try {
+            String usbCam = "horizonos.permission.USB_CAMERA";
+            if (!list.contains(usbCam)) list.add(usbCam);
+        } catch (Throwable ignored) {}
+        String[] needed = list.toArray(new String[0]);
+
         boolean all = true;
         for (String p : needed) {
-            if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) all = false;
+            boolean granted;
+            try {
+                granted = ContextCompat.checkSelfPermission(this, p)
+                        == PackageManager.PERMISSION_GRANTED;
+            } catch (Exception e) {
+                // 系统不认识该权限名（非 Quest 设备）→ 视为已满足
+                granted = true;
+            }
+            if (!granted) {
+                Log.i(TAG, "待授权: " + p);
+                all = false;
+            }
         }
         if (!all) {
             ActivityCompat.requestPermissions(this, needed, REQ_PERMISSIONS);
@@ -255,6 +281,9 @@ public class MainActivity extends AppCompatActivity {
             startForwarding();
             return;
         }
+        // ★ Quest (Horizon OS)：requestPermission 会立即回调拒绝（1ms，非用户操作），
+        // 而 dumpsys 实际已授予权限。故请求后给一个短超时兜底 —— 无论回调如何，
+        // 超时即继续启动转发，由 Service 侧直接尝试 openDevice 实测。
         tvStatus.setText(getString(R.string.msg_cameras_found,
                 cams.size(), pendingAuth.size()));
         requestNext();
@@ -268,10 +297,24 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         Intent intent = new Intent(ACTION_USB_PERMISSION);
+        // ★ 显式限定包名：Android 12+ 对隐式 Intent 有拦截，Quest (Horizon OS)
+        // 上隐式 PendingIntent 会导致系统权限对话框不弹出、回调永不触发
+        intent.setPackage(getPackageName());
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
         PendingIntent pi = PendingIntent.getBroadcast(this, 0, intent, flags);
         usbManager.requestPermission(dev, pi);
+        // ★ 超时兜底：Quest 上系统对话框可能不显示（回调永不返回），
+        // 2.5 秒后无论是否收到回调都继续，避免界面永久卡在"待授权"。
+        // 若系统其实已授予权限(hasPermission 为 true)，后续流程可正常开流。
+        final UsbDevice pending = dev;
+        tvStatus.postDelayed(() -> {
+            if (pendingAuth.contains(pending)) {
+                pendingAuth.remove(pending);
+                Log.w(TAG, "授权回调超时，跳过该设备继续: " + pending.getDeviceName());
+                requestNext();
+            }
+        }, 2500);
     }
 
     private void startForwarding() {

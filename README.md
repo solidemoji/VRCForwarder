@@ -74,6 +74,20 @@ VRCForwarder/
 > - 本项目正式包已在 manifest 中显式设置 `android:testOnly="false"`，
 >   若你遇到 `INSTALL_FAILED_TEST_ONLY`，说明拿到的是调试构建，加 `-t` 参数即可。
 
+#### Quest (Horizon OS) 用户请注意
+
+Quest 上前两次打开外接摄像头需要**额外授予一个系统权限**，这是 Horizon OS 的机制：
+
+1. 首次点「开始转发」时，头显内会弹出权限请求 —— **请务必点「允许」**
+   （权限名：`horizonos.permission.USB_CAMERA`，它是 Quest 访问 UVC 摄像头的唯一门禁）
+2. 若没弹窗或误点了拒绝，可在 **设置 → 应用 → VRCForwarder → 权限** 中手动打开
+
+> ⚠️ 该权限在 Horizon OS **应用商店审核中不被允许**，因此本 App 在 Quest 上
+> **只能侧载使用**（这也是它能工作的前提）。Pico 与安卓手机无此限制。
+
+> 小提示：Quest 上插入 USB 视频设备时，系统偶尔会弹一次「用某应用打开」的提示，
+> **忽略/关掉即可**，不影响本 App 使用。
+
 ### 2. 运行 PC 端
 
 **方式 A（推荐）：安装包**

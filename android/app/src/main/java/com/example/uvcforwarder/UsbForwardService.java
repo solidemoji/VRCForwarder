@@ -207,11 +207,12 @@ public class UsbForwardService extends Service {
         for (UsbDevice dev : cams) {
             if (findSlotByDevice(dev) != null) continue; // 已纳管
             if (!usbManager.hasPermission(dev)) {
-                // 无权限：自动弹授权（免驱设备无序列号，重插后权限不保留；
-                // 等待用户允许后自动接入，实现"插回即恢复"）
+                // ★ Quest (Horizon OS) 差异：dumpsys 显示已授权但 hasPermission()
+                // 返回 false，且 requestPermission 1ms 内直接回调拒绝（非用户操作）。
+                // 策略调整：仍发起一次授权请求（Pico/手机等正常设备需要），
+                // 但**不阻塞纳管** —— 立即继续尝试打开，失败由会话层报告。
                 anyMissingAuth = true;
                 requestSvcPermission(dev);
-                continue;
             }
             int sid = freeSlotId();
             if (sid < 0) {
@@ -233,11 +234,18 @@ public class UsbForwardService extends Service {
         if (!pendingPerms.add(name)) return; // 已有未决请求
         try {
             Intent intent = new Intent(ACTION_SVC_PERM);
+            // ★ 显式限定包名（Android 12+ 隐式 Intent 限制；Quest 上隐式
+            // PendingIntent 会导致系统对话框不弹出、回调永不触发）
+            intent.setPackage(getPackageName());
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
             PendingIntent pi = PendingIntent.getBroadcast(this, 1, intent, flags);
             Log.i(TAG, "自动请求授权: " + name);
             usbManager.requestPermission(dev, pi);
+            // ★ 超时兜底：部分系统(Quest/Horizon OS) 不显示 USB 权限对话框，
+            // 回调永不触发。3 秒后清理去重标记，让后续 attach/重扫能重试；
+            // 若系统实际已授权，下一轮扫描即会正常纳管。
+            slotHandler.postDelayed(() -> pendingPerms.remove(name), 3000);
         } catch (Exception e) {
             Log.e(TAG, "自动授权请求失败: " + name, e);
             pendingPerms.remove(name);
@@ -263,8 +271,12 @@ public class UsbForwardService extends Service {
             return;
         }
         if (!usbManager.hasPermission(found)) {
-            broadcast(getString(R.string.svc_no_permission, devName));
-            return;
+            // ★ Quest (Horizon OS) 已知差异：dumpsys 显示权限已授予，
+            // 但 hasPermission() 返回 false 且 requestPermission 立即回调拒绝。
+            // 因此这里不再直接拒绝，改为放行让 openDevice 实际试探 ——
+            // 真无权限时 openDevice 会返回 null，由会话层报错即可。
+            Log.w(TAG, "hasPermission=false，仍尝试打开(Quest 权限查询差异): "
+                    + devName);
         }
         int sid = freeSlotId();
         if (sid < 0) {
@@ -297,8 +309,34 @@ public class UsbForwardService extends Service {
         return false;
     }
 
+    /**
+     * 从当前设备列表按稳定 key(类型+VID:PID+序列号) 取最新设备对象。
+     * 用于规避设备地址漂移（两段式枚举、重插）导致的陈旧 UsbDevice 快照。
+     * 找不到（设备已拔出）时返回 null。
+     */
+    private UsbDevice findLatestByKey(UsbDevice ref) {
+        if (ref == null) return null;
+        final String key = UvcStreamer.deviceKey(ref);
+        for (UsbDevice d : usbManager.getDeviceList().values()) {
+            if (key.equals(UvcStreamer.deviceKey(d))) return d;
+        }
+        return null;
+    }
+
     /** 槽线程内：指定槽启动一路会话 */
     private void startSlotOnThread(int sid, UsbDevice dev) {
+        // ★ 设备对象刷新（Quest/Horizon OS 两段式枚举必需）
+        // XIAO 类设备插上后会先在 JTAG(303a:1001) 枚举、~2 秒后切换为 UVC(303a:8000)，
+        // 期间设备地址从 /dev/bus/usb/001/002 变为 .../001/003。若沿用旧快照对象，
+        // UsbUserPermissionManager.checkPermission() 会按已失效的地址查表而抛
+        // SecurityException（"User has not given ... permission"），即使权限其实已授予。
+        // 这里按 VID:PID+序列号重新从 getDeviceList() 取最新对象。
+        UsbDevice fresh = findLatestByKey(dev);
+        if (fresh != null && fresh != dev) {
+            Log.i(TAG, "设备对象已刷新: " + dev.getDeviceName() + " -> "
+                    + fresh.getDeviceName());
+            dev = fresh;
+        }
         final UvcStreamer.UvcKind kind = UvcStreamer.classify(dev);
         final String label = "路" + (sid + 1) + "[" + dev.getDeviceName() + "]";
 
@@ -319,7 +357,14 @@ public class UsbForwardService extends Service {
         slot.kind = kind;
         slot.sender = fs;
         // 独立连接：仅用于读 UVC 描述符里的摄像头名称(读名不占用流会话的连接)
-        try { slot.conn = usbManager.openDevice(dev); } catch (Exception ignored) {}
+        // 失败时补发一次权限请求：设备地址漂移后旧地址的授权不被系统认可，
+        // 需针对新地址重新请求（Quest/Horizon OS 两段式枚举场景）。
+        try {
+            slot.conn = usbManager.openDevice(dev);
+        } catch (Exception e) {
+            Log.w(TAG, "读名连接打开失败，重发授权请求: " + e.getMessage());
+            requestSvcPermission(dev);
+        }
         try {
             if (kind == UvcStreamer.UvcKind.BULK) {
                 UvcStreamer st = new UvcStreamer(usbManager, new UvcStreamer.Listener() {

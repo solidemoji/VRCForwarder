@@ -11,9 +11,34 @@
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!--
+      ★★ Quest (Horizon OS) 外接 UVC 摄像头的唯一门禁权限 ★★
+      实测（Quest 3S / Horizon OS 2.x）：
+        Permission [horizonos.permission.USB_CAMERA]: sourcePackage=horizonos.platform
+                                                      prot=dangerous   ← 运行时可申请
+      缺此权限时 UsbManager.openDevice() 必然抛：
+        SecurityException: User has not given <uid>/<pkg> permission to access /dev/bus/usb/...
+        （系统侧日志：UsbUserPermissionManager: USB Camera permission required
+                       for USB video class devices）
+      注意：android.permission.CAMERA 不是这个门禁（它管头显自身摄像头），
+            已 granted 也依然打不开外接 UVC。
+      该权限在 Horizon OS 应用商店不被允许 → Quest 版只能侧载分发。
+      声明后需在运行时请求（dangerous 级），见 MainActivity 的 needed 数组。
+    -->
+    <uses-permission android:name="horizonos.permission.USB_CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <uses-feature android:name="android.hardware.usb.host" android:required="true" />
+    <!--
+      Quest (Horizon OS) 的 2D 面板只支持横屏。声明 screen.landscape 明确告知
+      系统本应用可在横屏面板中运行；不要声明 screen.portrait（会被判定为
+      "仅竖屏应用" 而无法创建面板窗口 → 启动被静默拒绝）。
+      同时保留 vr.headtracking 为非必需，表明这是普通 2D 应用而非 VR 应用。
+    -->
+    <uses-feature android:name="android.hardware.screen.landscape"
+        android:required="false" />
+    <uses-feature android:name="android.hardware.vr.headtracking"
+        android:required="false" version="1" />
 
     <application
         android:allowBackup="true"
@@ -27,22 +52,39 @@
         android:theme="@style/Theme.UVCForwarder"
         tools:targetApi="31">
 
+        <!--
+          注意：不要锁竖屏。Quest (Horizon OS) 的 2D 面板只支持横屏/自适应，
+          声明 android:screenOrientation="portrait" 会导致 Quest 上启动即被静默拒绝
+          （进程不创建、无任何报错）。改为 unspecified 并允许 resize，
+          让系统按设备决定方向（Pico 竖屏、Quest 横屏面板都能正常显示）。
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="portrait">
+            android:screenOrientation="unspecified"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode|density|fontScale|navigation|layoutDirection|locale|touchscreen|keyboard">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <intent-filter>
-                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
-            </intent-filter>
+            <!--
+              注意：这里刻意【不】声明 USB_DEVICE_ATTACHED intent-filter +
+              device_filter meta-data。
 
-            <meta-data
-                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
-                android:resource="@xml/device_filter" />
+              原因（Quest / Horizon OS 实测）：一旦设备匹配到 device_filter，
+              系统会「记住该设备归属本 App」但**不再弹出 USB 权限对话框**，
+              认为应用自行负责请求权限；而 Quest 上应用主动 requestPermission()
+              也不会弹窗（2D 面板无法显示系统权限框），于是设备永远无权限。
+
+              对照实测：
+                · 免驱 ISO UVC（不在 filter 内）→ 系统弹窗→允许→权限正常 ✅
+                · XIAO bulk UVC（原在 filter 内）→ 不弹窗→请求静默失败 ❌
+
+              移除声明后，所有 UVC 设备都走系统标准「插入弹窗→用户允许」路径，
+              Quest / Pico / 手机行为一致。代价是插入设备不再自动唤起本 App。
+            -->
         </activity>
 
         <!-- 前台服务：后台持续转发。targetSdk 28，无前台服务类型限制 -->
