@@ -56,9 +56,18 @@
 
     <string name="version_format">v%1$s</string>
     <string name="title_help">使用方法</string>
-    <string name="help_body">1. 在 PC 上安装并运行 <b>VRCReceiver</b> 接收端（启动后会显示拉流地址）。\n2. 把 UVC 摄像头插到头显 / 手机的 USB 口（多路请用带外部供电的 USB Hub）。\n3. 在下方的输入框填写 PC 的局域网 IP，或点「自动搜索 PC 接收端」。\n4. 点「开始转发」，系统弹出 USB 授权时请选「允许」。\n5. 在 PC 端把面板上显示的地址复制到你的面捕 / 眼追软件里（如 Baballonia、OpenCV 系工具）。\n\n注意事项：\n• 请让头显与 PC 处于同一个 5GHz Wi-Fi 网络。\n• 退出 App 会停止转发——转发中会有一条常驻通知。\n• 支持多路摄像头同时转发（最多 6 路），拔出后自动恢复。\n\n<b>Quest 用户：</b>若系统弹出「用哪个应用打开该 USB 摄像头」的选择窗口（虚拟屏 / 媒体播放器之类），可以选「不允许」。如果它一直弹出，直接关掉即可，不影响本 App 使用。</string>
+    <string name="help_body">1. 在 PC 上安装并运行 <b>VRCReceiver</b> 接收端（启动后会显示拉流地址）。\n2. 把 UVC 摄像头插到头显 / 手机的 USB 口（多路请用带外部供电的 USB Hub）。\n3. 在下方的输入框填写 PC 的局域网 IP，或点「自动搜索 PC 接收端」。\n4. 点「开始转发」，系统弹出 USB 授权时请选「允许」。\n5. 在 PC 端把面板上显示的地址复制到你的面捕 / 眼追软件里（如 Baballonia、OpenCV 系工具）。\n\n注意事项：\n• 请让头显与 PC 处于同一个局域网内。\n• 退出 App 会停止转发——转发中会有一条常驻通知。\n• 支持多路摄像头同时转发（最多 6 路），拔出后自动恢复。\n\n<b>Quest 用户：</b>若系统弹出「用哪个应用打开该 USB 摄像头」的选择窗口（虚拟屏 / 媒体播放器之类），可以选「不允许」。如果它一直弹出，直接关掉即可，不影响本 App 使用。</string>
     <string name="about_body">VRCForwarder — 把 VR 头显 / 安卓手机上的 USB UVC 摄像头（眼追 / 面捕）经 Wi-Fi 转发到 PC。\n开源项目（MIT 许可）——可自由使用包括商用，需注明来源。</string>
 
     <string name="kind_bulk">BULK</string>
     <string name="kind_iso">ISO</string>
+    <string name="btn_spec">规格</string>
+    <string name="spec_dialog_title">选择视频规格</string>
+    <string name="spec_auto">自动（推荐）</string>
+    <string name="spec_saved">已保存：%1$s</string>
+    <string name="spec_unavailable">读不到相机的规格表，仅能使用「自动」</string>
+    <string name="spec_need_auth">请先授权该 USB 设备</string>
+    <string name="spec_prefix_auto">自动</string>
+    <string name="spec_prefix_manual">手动</string>
+    <string name="spec_label">%1$s（%2$s）</string>
 </resources>

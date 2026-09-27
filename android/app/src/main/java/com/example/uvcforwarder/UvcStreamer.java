@@ -41,6 +41,8 @@ public class UvcStreamer {
     private UsbDeviceConnection connection;
     private UsbInterface vsInterface;
     private UsbEndpoint bulkIn;
+    /** probe/commit 控制传输使用的 wIndex（接口号）。正常=VS 接口 id；兜底推测=VC+1 */
+    private int probeWIndex = -1;
     private Thread readThread;
     private volatile boolean running = false;
     private long interval100ns = UvcProto.FRAME_INTERVAL_30;
@@ -82,6 +84,18 @@ public class UvcStreamer {
      * 分类设备：按视频流接口的 IN 端点类型判定。
      * bulk-IN → BULK(XIAO/OpenIris 类)；isochronous-IN → ISO(标准免驱 UVC)；
      * 只有 VC 无 VS 或无线端点 → NONE。
+     *
+     * ★ Pico 4 Pro 兼容（实测根因，2026-09）：
+     * 部分一体机系统（Pico 4 Pro / Android 10 / PICO OS 5.13.7）对**复合 USB 设备的
+     * 接口枚举不完整** —— XIAO 这类 [CDC + CDC-Data + UVC-VC + UVC-VS] 四接口设备，
+     * 系统只暴露出前三个（含 UVC VideoControl 14/1），**缺失 VideoStreaming 接口(14/2)**
+     * 及其 bulk-IN 端点。此时端点循环一次都不进 → 被误判为 NONE → 设备不进列表。
+     *
+     * 因此增加两级兜底：
+     *   ① 有 class=14 接口但找不到任何 IN 端点 → 用已知 VID/PID 表判定（BULK），
+     *      让设备至少能进列表/可被打开（能否取流由后续 tryStartSession 决定）。
+     *   ② 仍有 class=14 但 VID/PID 不认识的 → 归为 ISO（标准免驱设备的常见形态），
+     *      由 saki 路径尝试；失败会在会话启动阶段报错，不影响其它设备。
      */
     public static UvcKind classify(UsbDevice d) {
         boolean hasVideo = false;
@@ -96,7 +110,114 @@ public class UvcStreamer {
                 if (ep.getType() == UsbConstants.USB_ENDPOINT_XFER_ISOC) return UvcKind.ISO;
             }
         }
-        return UvcKind.NONE;
+        if (!hasVideo) return UvcKind.NONE;
+
+        // ---- 兜底：有 UVC 视频接口但系统没暴露流接口端点 ----
+        if (isKnownBulkUvc(d)) return UvcKind.BULK;   // XIAO / OpenIris 等自研 bulk 固件
+        return UvcKind.ISO;                            // 未知设备按免驱处理（会尝试 saki）
+    }
+
+    /**
+     * 已知的自研 bulk-UVC 设备（VID:PID 表）。
+     * 用于「系统接口枚举不完整」时仍能正确分类（见 classify 注释）。
+     *  3534:32768 = 0x303A:0x8000  Espressif XIAO ESP32-S3 UVC 模式（OpenIris/Cymple 固件）
+     *  3534:4097  = 0x303A:0x1001  Espressif USB JTAG/serial（两段式枚举的中间态，非摄像头）
+     */
+    private static final int[][] KNOWN_BULK_VID_PID = {
+            {0x303A, 0x8000},   // XIAO ESP32-S3 UVC
+            {0x303A, 0x8001},   // XIAO ESP32-S3 UVC（备用 PID）
+            {0x303A, 0x4001},   // ESP32-S2/S3 摄像头类固件
+    };
+
+    /** 该设备是否在已知 bulk-UVC 白名单内 */
+    public static boolean isKnownBulkUvc(UsbDevice d) {
+        for (int[] vp : KNOWN_BULK_VID_PID) {
+            if (d.getVendorId() == vp[0] && d.getProductId() == vp[1]) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 找 UVC VideoControl 接口（class=14, subclass=1）。用于系统未暴露 VS 接口时的兜底。
+     * 找不到就退化为「第一个 class=14 接口」。
+     */
+    public static UsbInterface findVideoControlInterface(UsbDevice d) {
+        UsbInterface first14 = null;
+        for (int i = 0; i < d.getInterfaceCount(); i++) {
+            UsbInterface itf = d.getInterface(i);
+            if (itf.getInterfaceClass() != UvcProto.USB_CLASS_VIDEO) continue;
+            if (first14 == null) first14 = itf;
+            if (itf.getInterfaceSubclass() == UvcProto.VC_SUBCLASS) return itf;
+        }
+        return first14;
+    }
+
+    /**
+     * 在设备任意接口上找 bulk-IN 端点（系统未暴露 VS 接口时的兜底）。
+     *
+     * ★ 两级优先（Pico 4 Pro 实验，2026-09）：
+     *   ① 优先非 CDC 接口（class != 2/10）的 bulk-IN —— 正常的视频流端点；
+     *   ② 若只有 CDC 接口带 bulk-IN（实测 Pico 4 Pro/PICO OS 5.13.7 的系统
+     *      遗漏了 UVC VideoStreaming 接口，唯一 bulk-IN 落在 CDC Data 接口上，
+     *      如 XIAO 的 0x82），则**退一步尝试它**。
+     *
+     *   原理：XIAO 的 TinyUSB 复合设备在多接口场景下，若系统把 VS 接口"折叠"掉，
+     *   视频数据仍可能从实际存在的 bulk-IN 端点流出。这是一次**廉价验证** ——
+     *   收到帧即证明可行；收不到则明确判定该机型不支持。
+     *   风险为零：正常设备在 ① 就返回，永不走到 ②。
+     */
+    public static UsbEndpoint findAnyBulkIn(UsbDevice d) {
+        UsbEndpoint cdcFallback = null;
+        for (int i = 0; i < d.getInterfaceCount(); i++) {
+            UsbInterface itf = d.getInterface(i);
+            int c = itf.getInterfaceClass();
+            boolean isCdc = (c == 2 || c == 10);
+            for (int j = 0; j < itf.getEndpointCount(); j++) {
+                UsbEndpoint ep = itf.getEndpoint(j);
+                if (ep.getDirection() != UsbConstants.USB_DIR_IN) continue;
+                if (ep.getType() != UsbConstants.USB_ENDPOINT_XFER_BULK) continue;
+                if (isCdc) {
+                    if (cdcFallback == null) cdcFallback = ep;   // 记下但先不用
+                    continue;
+                }
+                Log.w(TAG, "兜底①：从接口 " + itf.getId() + "(class=" + c
+                        + ") 取到 bulk-IN 端点 addr=0x"
+                        + Integer.toHexString(ep.getAddress()));
+                return ep;
+            }
+        }
+        if (cdcFallback != null) {
+            Log.w(TAG, "兜底②：仅 CDC 接口有 bulk-IN 端点 addr=0x"
+                    + Integer.toHexString(cdcFallback.getAddress())
+                    + "，尝试用它（Pico 4 Pro 等系统遗漏 VS 接口的场景）");
+        }
+        return cdcFallback;
+    }
+
+    /** 找出给定端点所属的接口（claim 时必须针对该接口） */
+    public static UsbInterface interfaceOf(UsbDevice d, UsbEndpoint ep) {
+        for (int i = 0; i < d.getInterfaceCount(); i++) {
+            UsbInterface itf = d.getInterface(i);
+            for (int j = 0; j < itf.getEndpointCount(); j++) {
+                if (itf.getEndpoint(j).getAddress() == ep.getAddress()) return itf;
+            }
+        }
+        return null;
+    }
+
+    /** 描述设备全部接口（失败时打日志用，便于客户回传定位） */
+    public static String describeInterfaces(UsbDevice d) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < d.getInterfaceCount(); i++) {
+            UsbInterface itf = d.getInterface(i);
+            if (i > 0) sb.append(", ");
+            sb.append(itf.getId()).append(':')
+              .append(itf.getInterfaceClass()).append('/')
+              .append(itf.getInterfaceSubclass()).append('/')
+              .append(itf.getInterfaceProtocol())
+              .append("(ep=").append(itf.getEndpointCount()).append(')');
+        }
+        return sb.append(']').toString();
     }
 
     /**
@@ -191,6 +312,11 @@ public class UvcStreamer {
                 ? p.trim()
                 : String.format(java.util.Locale.US, "%04X:%04X",
                         d.getVendorId(), d.getProductId());
+        // ★ 必须追加 PID：廉价 UVC 模组常把 serial 写成同一个假值
+        //   （实测：OV9281 与 GC0308 都是 "SN0001"，VID 也都是 0C45）
+        //   ⇒ 仅靠名字 + 序列号会**完全撞车**，PC 端/OBS 里两颗相机无法区分。
+        //   PID 不同，用它兜底最稳（key 里本来就有 PID，这里让显示名也对齐）。
+        name += String.format(java.util.Locale.US, " %04X", d.getProductId());
         String s = d.getSerialNumber();
         if (s != null && !s.isEmpty()) {
             name += "#" + (s.length() > 6 ? s.substring(s.length() - 6) : s);
@@ -228,8 +354,29 @@ public class UvcStreamer {
 
         vsInterface = findStreamingInterface(dev);
         if (vsInterface == null) {
-            throw new IOException("未找到 UVC 视频流接口(Class 0x0E)。"
-                    + "设备接口数=" + dev.getInterfaceCount() + "，请确认固件已启用 UVC 模式");
+            // ★ Pico 4 Pro 兼容兜底：系统可能只暴露了 UVC VideoControl(14/1)，
+            //   缺失 VideoStreaming(14/2)。此时无法通过接口拿 bulk-IN 端点。
+            //   尝试：① 有 VC 接口就继续（用 VC 接口发 probe/commit，端点从设备全局找）
+            //        ② 仍失败再抛明确错误，便于日志定位。
+            UsbInterface vc = findVideoControlInterface(dev);
+            if (vc != null) {
+                Log.w(TAG, "系统未暴露 UVC VideoStreaming 接口，改用 VC 接口兜底: id="
+                        + vc.getId() + "；设备接口数=" + dev.getInterfaceCount());
+                vsInterface = vc;   // 后续 probe/commit 走它；端点解析走 findAnyBulkIn()
+                // ★ 关键：probe/commit 必须发往 VS 接口号，但系统没枚举出 VS。
+                //   标准 UVC 复合设备里 VC 与 VS 紧邻，VS 通常 = VC+1；
+                //   若 VC 已是最后一个接口则退回 VC 自身。
+                //   实测 Pico 4 Pro：VC=2，固件内 VS=3（发到 2 会被固件拒绝，返回 -1）。
+                int guess = vc.getId() + 1;
+                probeWIndex = (guess < dev.getInterfaceCount()) ? guess : vc.getId();
+                Log.w(TAG, "probe/commit 的 wIndex 推测为 " + probeWIndex
+                        + "（VC id=" + vc.getId() + "，接口总数=" + dev.getInterfaceCount() + "）");
+            } else {
+                throw new IOException("未找到 UVC 视频流接口(Class 0x0E)。"
+                        + "设备接口数=" + dev.getInterfaceCount()
+                        + "，接口 class=" + describeInterfaces(dev)
+                        + "，请确认固件已启用 UVC 模式");
+            }
         }
         Log.i(TAG, "选中 VS 接口 id=" + vsInterface.getId()
                 + " class=" + vsInterface.getInterfaceClass()
@@ -240,17 +387,7 @@ public class UvcStreamer {
             throw new IOException("openDevice 失败：USB 权限可能未授予或设备被占用");
         }
 
-        // 只 claim 视频接口（含 VC 若有）。CDC 接口让系统/其他应用使用，互不干扰。
-        boolean claimed = connection.claimInterface(vsInterface, true);
-        if (!claimed) {
-            // 部分内核在 claim 前需先 setInterface(alt 0)
-            connection.setInterface(vsInterface);
-            claimed = connection.claimInterface(vsInterface, true);
-        }
-        if (!claimed) {
-            throw new IOException("claimInterface 失败（接口被占用？）");
-        }
-
+        // 先确定要用的 bulk-IN 端点（可能来自 VS 接口，也可能是兜底来的）
         for (int j = 0; j < vsInterface.getEndpointCount(); j++) {
             UsbEndpoint ep = vsInterface.getEndpoint(j);
             if (ep.getType() == UsbConstants.USB_ENDPOINT_XFER_BULK
@@ -260,12 +397,40 @@ public class UvcStreamer {
             }
         }
         if (bulkIn == null) {
-            throw new IOException("VS 接口上没有 bulk-IN 端点（该固件应是 bulk 模式）");
+            // ★ Pico 4 Pro 兜底：system 未暴露 VS 接口时，vsInterface 实际是 VC 接口，
+            //   其上没有端点。退化为「在设备任意接口上找 bulk-IN」（含 CDC 二级兜底）。
+            bulkIn = findAnyBulkIn(dev);
+        }
+        if (bulkIn == null) {
+            throw new IOException("找不到 bulk-IN 端点（该固件应是 bulk 模式）。接口="
+                    + describeInterfaces(dev)
+                    + "；若这是 Pico 4 Pro 等旧系统设备，可能是系统未暴露 VideoStreaming 接口");
+        }
+
+        // 找到该端点所属的接口 —— 必须 claim「它所在的接口」，否则 bulkTransfer 会失败。
+        // （兜底场景下端点可能挂在 CDC Data 接口上，此时不能只 claim VC 接口。）
+        UsbInterface epOwner = interfaceOf(dev, bulkIn);
+        UsbInterface toClaim = (epOwner != null) ? epOwner : vsInterface;
+        Log.i(TAG, "将 claim 接口 id=" + toClaim.getId()
+                + " class=" + toClaim.getInterfaceClass()
+                + "（端点 addr=0x" + Integer.toHexString(bulkIn.getAddress()) + "）");
+
+        boolean claimed = connection.claimInterface(toClaim, true);
+        if (!claimed) {
+            // 部分内核在 claim 前需先 setInterface(alt 0)
+            try { connection.setInterface(toClaim); } catch (Exception ignored) {}
+            claimed = connection.claimInterface(toClaim, true);
+        }
+        if (!claimed) {
+            throw new IOException("claimInterface 失败（接口 " + toClaim.getId()
+                    + " 被占用？）。接口=" + describeInterfaces(dev));
         }
 
         // ---- 握手：SET_CUR(PROBE) -> SET_CUR(COMMIT) ----
         byte[] probe = buildProbe26(interval100ns);
-        int vsId = vsInterface.getId();
+        // probeWIndex：正常设备 = VS 接口 id（与旧行为完全一致）；
+        // 仅在 VS 接口缺失的兜底场景下 = 推测的 VS 接口号。
+        int vsId = (probeWIndex >= 0) ? probeWIndex : vsInterface.getId();
         notify("正在与摄像头协商视频参数(" + (10000000 / interval100ns) + "fps)...");
 
         int s1 = connection.controlTransfer(UvcProto.BMREQ_HOST_TO_DEV, UvcProto.REQ_SET_CUR,
@@ -431,6 +596,7 @@ public class UvcStreamer {
             try { connection.close(); } catch (Exception ignored) {}
             connection = null;
         }
+        probeWIndex = -1;   // 下次 start() 重新判定（避免复用实例时残留推测值）
         if (running) { // 非主动停止导致的退出
             notify("视频流已中断");
         }

@@ -126,6 +126,14 @@ STRINGS = {
         "zh": "暂无推流", "en": "No active stream", "ja": "配信なし",
         "ko": "스트림 없음", "ru": "Нет потоков",
     },
+    # ---- 启动后的中央提示（尚无画面时显示：同一局域网 + 要填的 IP/端口）----
+    "hint_msg": {
+        "zh": "确保 VR 和 PC 处于同一局域网内，并将此 IP 和端口号填入 VR 端 App 中，或者使用 App 内的自动搜索功能",
+        "en": "Make sure the VR and PC are on the same LAN, then enter this IP and port in the VR app — or use Auto-detect in the app.",
+        "ja": "VR と PC が同じ LAN にあることを確認し、この IP とポートを VR 側アプリに入力してください（アプリ内の「自動検索」も使えます）。",
+        "ko": "VR과 PC가 같은 LAN에 있는지 확인한 뒤, 이 IP와 포트를 VR 앱에 입력하세요(앱의 '자동 검색'도 사용 가능).",
+        "ru": "Убедитесь, что VR и ПК в одной локальной сети, затем введите этот IP и порт в приложении VR (или «Автопоиск»).",
+    },
 }
 
 

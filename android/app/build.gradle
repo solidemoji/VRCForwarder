@@ -13,9 +13,18 @@ android {
     defaultConfig {
         applicationId "com.example.uvcforwarder"
         minSdk 28
-        // 刻意保持低 targetSdk（28）：侧载工具 App，避开 Android 10+ 前台服务类型限制，
-        // 使 RECORD_AUDIO 保活 + 后台转发行为与老系统一致；不上架商店，无合规压力。
-        targetSdk 28
+        // ★ targetSdk 刻意压到 27（不是 28）：
+        // ① 侧载工具 App，低 targetSdk 可避开 Android 10+ 前台服务类型限制，
+        //    使 RECORD_AUDIO 保活 + 后台转发行为与老系统一致；不上架商店，无合规压力。
+        // ② 【关键·Android 10 兼容】Android 10 (SDK 29) 对 UVC(class 14) USB 设备有权限判据：
+        //    targetSdk >= 28 时，**即使已授予 CAMERA 权限**也拿不到该 UVC 设备的 USB 权限。
+        //    证据：saki4510t/UVCPermissionTest 实测（Pixel3 / Essential PH-1）
+        //          targetSdk <= 27 → OK；targetSdk >= 28 → NG(unexpected)
+        //    源码：AOSP UsbUserPermissionManager 按 targetSdkVersion >= VERSION_CODES.P 判定，
+        //          拒绝时"不弹窗、直接拒"，logcat: "Camera permission required for USB video
+        //          class devices"。CameraFi 官方公告亦确认，Android 11 已修复。
+        //    ⇒ 压到 27 是 Android 10（Pico 4 / 4 Pro）能打开外接 UVC 相机的前提。
+        targetSdk 27
         // 0.x 版本号：功能可日常使用，但仍在迭代
         // 0.0.2: 修复 Quest (Horizon OS) 上 2D 面板无法创建导致启动被静默拒绝的问题
         // 0.0.3: ★ Quest 上外接 UVC 摄像头的关键修复 —— 补 horizonos.permission.USB_CAMERA

@@ -717,6 +717,18 @@ class MainWindow(QMainWindow):
         scroll.setWidget(container)
         self.setCentralWidget(scroll)
 
+        # 中央提示：尚无画面时占满窗口中央，大字告知「同一局域网 + 要填入 VR 端 App 的 IP:端口」
+        self._port = port
+        self.hint = QLabel()
+        self.hint.setTextFormat(Qt.RichText)
+        self.hint.setAlignment(Qt.AlignCenter)
+        self.hint.setWordWrap(True)
+        self.hint.setMinimumHeight(360)
+        self.hint.setStyleSheet(
+            "background:#161616; border:1px solid #333; border-radius:12px;")
+        self.grid.addWidget(self.hint, 0, 0)
+        self._update_hint()
+
         # 状态栏
         self.statusBar().showMessage(t("starting"))
 
@@ -751,6 +763,18 @@ class MainWindow(QMainWindow):
                                        ip=receiver.local_ip(), mj=mjpeg_port))
 
     # ---------------- 槽 ----------------
+    def _update_hint(self):
+        """中央提示：同一局域网 + 要填入 VR 端 App 的 IP:端口（只是提醒，不多写废话）"""
+        try:
+            ip = receiver.local_ip()
+        except Exception:
+            ip = "0.0.0.0"
+        self.hint.setText(
+            f"<div style='color:#dddddd; font-size:17px;'>{t('hint_msg')}</div>"
+            f"<div style='height:28px;'></div>"
+            f"<div style='color:#ff8a1f; font-size:38px; font-weight:bold;'>"
+            f"{ip}:{self._port}</div>")
+
     def _create_panel(self, sid):
         url = f"http://127.0.0.1:{self.mjpeg_port}/cam/{sid}" if self.mjpeg_port else None
         panel = CameraPanel(sid, self.display_fps, url)
@@ -758,6 +782,8 @@ class MainWindow(QMainWindow):
         col = sid % 2
         row = sid // 2
         self.grid.addWidget(panel, row, col)
+        # 已经收到画面 -> 撤掉中央提示
+        self.hint.hide()
         return panel
 
     def on_new_stream(self, sid):

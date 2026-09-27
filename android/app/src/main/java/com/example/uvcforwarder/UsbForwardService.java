@@ -549,6 +549,19 @@ public class UsbForwardService extends Service {
         i.setPackage(getPackageName());
         i.putExtra(UvcProto.EXTRA_DEVICE_NAME, devName);
         i.putExtra(UvcProto.EXTRA_DEVICE_ACTIVE, active);
+        // 附带该路**实际生效**的视频规格（ISO 才有），让 UI 显示「自动（MJPEG 640x480@120）」
+        if (active && devName != null && slots != null) {
+            for (Slot s : slots) {
+                if (s != null && s.active && s.device != null
+                        && devName.equals(s.device.getDeviceName())) {
+                    if (s.iso != null) {
+                        String spec = s.iso.getActiveSpecText();
+                        if (spec != null) i.putExtra(UvcProto.EXTRA_DEVICE_SPEC, spec);
+                    }
+                    break;
+                }
+            }
+        }
         sendBroadcast(i);
     }
 }

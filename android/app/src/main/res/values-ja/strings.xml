@@ -56,9 +56,18 @@
 
     <string name="version_format">v%1$s</string>
     <string name="title_help">使い方</string>
-    <string name="help_body">1. PC に <b>VRCReceiver</b> をインストールして起動します（配信アドレスが表示されます）。\n2. UVC カメラをヘッドセット / スマホの USB 端子に接続します（複数の場合は電源付き USB ハブを使用してください）。\n3. 下の入力欄に PC の LAN IP を入力するか、「PC 受信側を自動検索」をタップします。\n4. 「転送開始」をタップし、USB 権限のダイアログで「許可」を選びます。\n5. PC 側でパネルに表示されたアドレスを、フェイス/アイトラッキングソフト（Baballonia など）に貼り付けます。\n\n注意：\n• ヘッドセットと PC は同じ 5GHz Wi-Fi に接続してください。\n• アプリを終了すると転送は停止します（実行中は常駐通知が表示されます）。\n• 最大 6 台まで同時転送でき、抜き差しは自動で復帰します。\n\n<b>Quest ユーザー：</b>USB カメラをどのアプリで開くかを尋ねるシステムダイアログ（仮想スクリーン / メディアアプリの選択）が表示された場合は、「許可しない」を選んで構いません。繰り返し表示される場合も閉じるだけで、本アプリの動作には影響しません。</string>
+    <string name="help_body">1. PC に <b>VRCReceiver</b> をインストールして起動します（配信アドレスが表示されます）。\n2. UVC カメラをヘッドセット / スマホの USB 端子に接続します（複数の場合は電源付き USB ハブを使用してください）。\n3. 下の入力欄に PC の LAN IP を入力するか、「PC 受信側を自動検索」をタップします。\n4. 「転送開始」をタップし、USB 権限のダイアログで「許可」を選びます。\n5. PC 側でパネルに表示されたアドレスを、フェイス/アイトラッキングソフト（Baballonia など）に貼り付けます。\n\n注意：\n• ヘッドセットと PC を同じ LAN に接続してください。\n• アプリを終了すると転送は停止します（実行中は常駐通知が表示されます）。\n• 最大 6 台まで同時転送でき、抜き差しは自動で復帰します。\n\n<b>Quest ユーザー：</b>USB カメラをどのアプリで開くかを尋ねるシステムダイアログ（仮想スクリーン / メディアアプリの選択）が表示された場合は、「許可しない」を選んで構いません。繰り返し表示される場合も閉じるだけで、本アプリの動作には影響しません。</string>
     <string name="about_body">VRCForwarder — VR ヘッドセット / Android スマホの USB UVC カメラ（アイ/フェイストラッキング）を Wi-Fi 経由で PC へ転送します。\nオープンソース（MIT）— 商用を含め自由に利用可、出典の明記が必要です。</string>
 
     <string name="kind_bulk">BULK</string>
     <string name="kind_iso">ISO</string>
+    <string name="btn_spec">仕様</string>
+    <string name="spec_dialog_title">映像仕様の選択</string>
+    <string name="spec_auto">自動（推奨）</string>
+    <string name="spec_saved">保存しました：%1$s</string>
+    <string name="spec_unavailable">カメラの仕様表を読み取れません。「自動」のみ利用可能です</string>
+    <string name="spec_need_auth">先にこのUSBデバイスを許可してください</string>
+    <string name="spec_prefix_auto">自動</string>
+    <string name="spec_prefix_manual">手動</string>
+    <string name="spec_label">%1$s（%2$s）</string>
 </resources>

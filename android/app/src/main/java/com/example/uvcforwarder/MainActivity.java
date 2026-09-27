@@ -1,6 +1,7 @@
 package com.example.uvcforwarder;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -60,6 +61,8 @@ public class MainActivity extends AppCompatActivity {
     private String pendingSingleName = null;
     /** 当前在转发的设备名集合（由 Service 的 DEVICE_STATE 广播同步） */
     private final Set<String> activeDevices = new HashSet<>();
+    /** 各活动路**实际生效**的视频规格文本（设备名 → "MJPEG 640x480@120"） */
+    private final java.util.Map<String, String> deviceSpec = new java.util.HashMap<>();
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override
@@ -100,7 +103,16 @@ public class MainActivity extends AppCompatActivity {
                 String name = intent.getStringExtra(UvcProto.EXTRA_DEVICE_NAME);
                 if (name != null) {
                     boolean act = intent.getBooleanExtra(UvcProto.EXTRA_DEVICE_ACTIVE, false);
-                    if (act) activeDevices.add(name); else activeDevices.remove(name);
+                    if (act) {
+                        activeDevices.add(name);
+                        String spec = intent.getStringExtra(UvcProto.EXTRA_DEVICE_SPEC);
+                        if (!TextUtils.isEmpty(spec)) {
+                            deviceSpec.put(name, spec);
+                        }
+                    } else {
+                        activeDevices.remove(name);
+                        deviceSpec.remove(name);
+                    }
                     refreshDeviceList();
                 }
             } else if (UvcProto.ACTION_STATUS.equals(action)) {
@@ -372,16 +384,22 @@ public class MainActivity extends AppCompatActivity {
 
     private android.view.View buildDeviceRow(UsbDevice dev) {
         final String name = dev.getDeviceName();
-        // 已授权时可用临时连接读 UVC 描述符名(优先)，否则退 USB 产品名
+        UvcStreamer.UvcKind kind = UvcStreamer.classify(dev);
+        final boolean authed = usbManager.hasPermission(dev);
+        // 已授权时用**一次**临时连接同时读：UVC 描述符名(优先) + 真实能力表(供规格显示/预测)
         UsbDeviceConnection tmpConn = null;
-        if (usbManager.hasPermission(dev)) {
-            try { tmpConn = usbManager.openDevice(dev); } catch (Exception ignored) {}
+        List<UvcDescriptors.Format> table = null;
+        if (authed) {
+            try {
+                tmpConn = usbManager.openDevice(dev);
+                if (tmpConn != null && kind == UvcStreamer.UvcKind.ISO) {
+                    table = UvcDescriptors.readQuiet(tmpConn);
+                }
+            } catch (Exception ignored) {}
         }
         final String display = UvcStreamer.deviceDisplayName(dev, tmpConn);
         if (tmpConn != null) { try { tmpConn.close(); } catch (Exception ignored) {} }
-        UvcStreamer.UvcKind kind = UvcStreamer.classify(dev);
         final boolean active = activeDevices.contains(name);
-        final boolean authed = usbManager.hasPermission(dev);
 
         String kindLabel = getString(kind == UvcStreamer.UvcKind.BULK
                 ? R.string.kind_bulk : R.string.kind_iso);
@@ -420,8 +438,14 @@ public class MainActivity extends AppCompatActivity {
         tvName.setTypeface(null, android.graphics.Typeface.BOLD);
         infoCol.addView(tvName);
 
+        // 规格行：只有 ISO 显示（BULK 是自家固件，规格固定）
+        String specLine = (kind == UvcStreamer.UvcKind.ISO)
+                ? specTextFor(dev, active, table) : null;
+
         TextView tvSub = new TextView(this);
-        tvSub.setText(kindLabel + " · " + state);
+        tvSub.setText(specLine == null
+                ? (kindLabel + " · " + state)
+                : (kindLabel + " · " + state + " · " + specLine));
         tvSub.setTextSize(11);
         tvSub.setTextColor(stateColor);
         LinearLayout.LayoutParams lpSub = new LinearLayout.LayoutParams(
@@ -451,8 +475,172 @@ public class MainActivity extends AppCompatActivity {
                 startOne(dev);
             }
         });
+
+        // 「规格」按钮：只有 ISO 免驱相机需要（BULK 是自家固件，规格固定）
+        if (kind == UvcStreamer.UvcKind.ISO) {
+            Button btnSpec = new Button(this);
+            btnSpec.setText(R.string.btn_spec);
+            btnSpec.setTextSize(12);
+            btnSpec.setAllCaps(false);
+            btnSpec.setBackgroundResource(R.drawable.bg_button_outline);
+            btnSpec.setTextColor(getColorRes(R.color.text_primary));
+            btnSpec.setPadding(0, 0, 0, 0);
+            btnSpec.setMinWidth(0);
+            btnSpec.setMinimumWidth(0);
+            LinearLayout.LayoutParams lpSpec = new LinearLayout.LayoutParams(dp(56), dp(38));
+            lpSpec.setMargins(dp(8), 0, 0, 0);
+            btnSpec.setLayoutParams(lpSpec);
+            btnSpec.setEnabled(authed);
+            btnSpec.setOnClickListener(v -> openSpecDialog(dev));
+            row.addView(btnSpec);
+        }
         row.addView(btn);
         return row;
+    }
+
+    // ================= 视频规格（手动选择：分辨率 × 帧率） =================
+
+    /**
+     * 规格列表里**隐藏低于此帧率**的档位。
+     * 原因：低于 30fps 对转发没有实用价值（实测在 GC0308 上选 10fps 档，
+     * 实际仍按 30fps 出流），留着只会误导。
+     */
+    private static final int MIN_SPEC_FPS = 30;
+
+    /**
+     * 某相机「当前生效 / 将会生效」的规格文本，带来源标注：
+     * <ul>
+     *   <li>用户选过 →「手动（MJPEG 640x400@210）」</li>
+     *   <li>自动     →「自动（MJPEG 640x480@120）」（按描述符能力表 + 同一套策略预测）</li>
+     * </ul>
+     * 正在转发的路优先用 Service 回报的**实际值** —— 它可能与预测不同
+     * （例如手动档设置失败后自动回落）。
+     */
+    private String specTextFor(UsbDevice dev, boolean active,
+                               List<UvcDescriptors.Format> table) {
+        UvcSpecPrefs.Spec manual = UvcSpecPrefs.parse(
+                UvcSpecPrefs.get(this, UvcStreamer.deviceKey(dev)));
+        String prefix = getString(manual != null
+                ? R.string.spec_prefix_manual : R.string.spec_prefix_auto);
+
+        String detail = active ? deviceSpec.get(dev.getDeviceName()) : null;
+        if (detail == null) {
+            if (manual != null) {
+                detail = manual.describe();
+            } else if (table != null && !table.isEmpty()) {
+                detail = IsoUvcSession.predictAutoSpec(table);
+            }
+        }
+        return detail == null ? prefix : getString(R.string.spec_label, prefix, detail);
+    }
+
+    /** 对话框里的一条可选规格 */
+    private static final class SpecOption {
+        final int fmt, w, h, fps;
+
+        SpecOption(int fmt, int w, int h, int fps) {
+            this.fmt = fmt;
+            this.w = w;
+            this.h = h;
+            this.fps = fps;
+        }
+
+        boolean mjpeg() { return fmt == UvcDescriptors.FRAME_FORMAT_MJPEG; }
+
+        String label() {
+            return (mjpeg() ? "MJPEG" : "YUYV") + "  " + w + "x" + h
+                    + (fps > 0 ? "  @" + fps + "fps" : "");
+        }
+    }
+
+    /**
+     * 打开「规格」选择框：列出**从 UVC 描述符解析出的真实能力**
+     * （格式 × 分辨率 × 帧率），选完即存（按设备 key），正在转发的会重启以立即生效。
+     */
+    private void openSpecDialog(UsbDevice dev) {
+        if (!usbManager.hasPermission(dev)) {
+            Toast.makeText(this, R.string.spec_need_auth, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // 读真实能力表：临时连接，读完即关
+        List<UvcDescriptors.Format> table = null;
+        UsbDeviceConnection conn = null;
+        try {
+            conn = usbManager.openDevice(dev);
+            if (conn != null) table = UvcDescriptors.read(conn, dev);
+        } catch (Exception e) {
+            Log.w(TAG, "读规格表异常: " + e);
+        } finally {
+            if (conn != null) {
+                try { conn.close(); } catch (Exception ignored) {}
+            }
+        }
+
+        final List<String> labels = new ArrayList<>();
+        final List<String> values = new ArrayList<>();
+        labels.add(getString(R.string.spec_auto));
+        values.add(UvcSpecPrefs.AUTO);
+
+        if (table != null && !table.isEmpty()) {
+            List<SpecOption> opts = new ArrayList<>();
+            for (UvcDescriptors.Format f : table) {
+                for (UvcDescriptors.Frame fr : f.frames) {
+                    if (fr.width <= 0 || fr.height <= 0) continue;
+                    float[] fps = fr.fps();
+                    if (fps.length == 0) {
+                        // 帧率未知：保留（不猜）
+                        opts.add(new SpecOption(f.frameFormat, fr.width, fr.height, 0));
+                    } else {
+                        for (float v : fps) {
+                            int r = Math.round(v);
+                            if (r < MIN_SPEC_FPS) continue;   // 隐藏低帧率档位
+                            opts.add(new SpecOption(f.frameFormat, fr.width, fr.height, r));
+                        }
+                    }
+                }
+            }
+            // MJPEG 优先 → 面积大优先 → 帧率高优先
+            opts.sort((a, b) -> {
+                if (a.mjpeg() != b.mjpeg()) return a.mjpeg() ? -1 : 1;
+                int aa = a.w * a.h, bb = b.w * b.h;
+                if (aa != bb) return bb - aa;
+                return b.fps - a.fps;
+            });
+            for (SpecOption o : opts) {
+                labels.add(o.label());
+                values.add(UvcSpecPrefs.encode(o.fmt, o.w, o.h, o.fps));
+            }
+        }
+
+        final String key = UvcStreamer.deviceKey(dev);
+        int checked = values.indexOf(UvcSpecPrefs.get(this, key));
+        if (checked < 0) checked = 0;
+        if (values.size() <= 1) {
+            Toast.makeText(this, R.string.spec_unavailable, Toast.LENGTH_LONG).show();
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.spec_dialog_title)
+                .setSingleChoiceItems(labels.toArray(new String[0]), checked,
+                        (dlg, which) -> {
+                            String v = values.get(which);
+                            UvcSpecPrefs.set(MainActivity.this, key, v);
+                            UvcSpecPrefs.Spec sp = UvcSpecPrefs.parse(v);
+                            String shown = (sp == null)
+                                    ? getString(R.string.spec_auto) : sp.describe();
+                            Toast.makeText(MainActivity.this,
+                                    getString(R.string.spec_saved, shown),
+                                    Toast.LENGTH_SHORT).show();
+                            dlg.dismiss();
+                            // 正在转发 → 重启该路让新规格立即生效
+                            if (activeDevices.contains(dev.getDeviceName())) {
+                                stopOne(dev);
+                                new android.os.Handler(getMainLooper()).postDelayed(
+                                        () -> startOne(dev), 700);
+                            }
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /** 取颜色资源(自动适配深浅色) */

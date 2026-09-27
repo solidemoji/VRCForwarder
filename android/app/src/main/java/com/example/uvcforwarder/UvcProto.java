@@ -14,6 +14,7 @@ public final class UvcProto {
 
     // ---- USB 类定义 ----
     public static final int USB_CLASS_VIDEO      = 0x0E; // bInterfaceClass (UVC)
+    public static final int VC_SUBCLASS          = 0x01; // VideoControl 子类
     public static final int VS_SUBCLASS_STREAMING = 0x02; // Video Streaming 子类
 
     // ---- UVC 类请求（发往 VideoStreaming 接口）----
@@ -67,6 +68,8 @@ public final class UvcProto {
     public static final String ACTION_DEVICE_STATE = "com.example.uvcforwarder.DEVICE_STATE";
     public static final String EXTRA_DEVICE_NAME = "device_name";
     public static final String EXTRA_DEVICE_ACTIVE = "device_active";
+    /** 该路**实际生效**的视频规格文本（形如 "MJPEG 640x480@120"），供 UI 显示 */
+    public static final String EXTRA_DEVICE_SPEC = "device_spec";
     /** Service 单设备操作命令 */
     public static final String EXTRA_DEVICE_ACTION = "device_action";
     public static final String DEVICE_ACTION_START = "start";
