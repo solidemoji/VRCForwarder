@@ -33,8 +33,14 @@ android {
         // 0.0.4: 文档/文案更新 —— 五语言「使用方法」补 Quest 系统弹窗提示
         //        （插 USB 设备时若弹出「用哪个应用打开」/虚拟屏选择，可点「不允许」，
         //         反复弹出直接关闭即可，不影响本 App）；README/Release 说明同步
-        versionCode 6
-        versionName "0.0.4"
+        // 0.0.5: ① 新增「规格」手动选择（按相机描述符真实能力表列出 格式×分辨率×帧率），
+        //          并显示当前实际生效的规格（自动模式亦标注自动选中了哪一档）
+        //        ② 规格列表过滤 <30fps 档位（实测无实用价值）
+        //        ③ targetSdk 28 → 27：针对 Android 10「有 CAMERA 权限仍拿不到 UVC USB 权限」
+        //          的已知行为（未上机验证，无 Android 10 设备）
+        //        ④ 修正教程「必须同一 5GHz Wi-Fi」→ 同一局域网即可
+        versionCode 7
+        versionName "0.0.5"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
