@@ -75,12 +75,17 @@ unverified — please download it, try it, and report back.**
 | Other Android phones / tablets | Android 9 or newer | ❓ Untested |
 
 **About Pico 4 / 4 Pro**: an **older APK build was tested on one of these and failed**
-(the device plug-in is detected, but the camera list stays empty). Our analysis points to a
-known Android 10 behaviour — when `targetSdk >= 28`, a UVC device **cannot obtain USB
-permission even with the `CAMERA` permission granted**. The current build therefore
-**deliberately lowers `targetSdk` to 27** to work around it, but we have **no Android 10
-device to verify against**, so it is honestly marked *untested* rather than
-supported or unsupported.
+(the device plug-in is detected, but the camera list stays empty).
+
+Android 10 adds an **extra gate for UVC-class devices** (see AOSP `UsbUserSettingsManager`):
+when `targetSdk >= 28` the app must already hold the `CAMERA` runtime permission, otherwise USB
+permission for the device is denied; with **`targetSdk <= 27` the check is skipped entirely**.
+The current build therefore **lowers `targetSdk` to 27**, removing that dependency.
+
+That said, what we observed on the customer's device was an interface list (system side, via
+`dumpsys usb`) that was **missing the UVC video-streaming interface** — if the failure happens in
+the kernel/vendor layer, no app-side change can help. We have **no Android 10 device to verify
+against**, so this is honestly marked *untested* rather than supported or unsupported.
 
 > The app's `minSdk` is **28 (Android 9.0)** — systems below that cannot install it.
 
