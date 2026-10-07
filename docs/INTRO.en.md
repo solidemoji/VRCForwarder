@@ -85,8 +85,18 @@ PICO OS 5.13.7**) specifically to test this:
 > The earlier "device is detected but the camera list stays empty" report reproduced **only with our
 > own XIAO firmware (a USB composite descriptor: CDC + UVC)**: Android 10's USB enumeration does not
 > expose the VideoStreaming interface of such a composite descriptor, **while the very same firmware
-> enumerates correctly on Windows and on Android 14**. This is unrelated to camera compatibility — it
-> is a firmware-descriptor/Android-10 enumeration issue that is still being investigated.
+> enumerates correctly on Windows and on Android 14**.
+>
+> We then ran an exhaustive sweep — **with/without CDC × BULK/ISO transfer × alt layout, 5 firmware
+> builds in total, all failing**. System logs show AOSP's `UsbDescriptorParser` throwing
+> `NegativeArraySizeException` on this descriptor and aborting the parse (it first mis-reads the CDC
+> `0x24` class descriptors as audio, desyncing the stream). Final conclusion: **Android 10's USB
+> enumeration layer does not expose the video-streaming interface of this firmware, and no app-side
+> change can fix it.**
+>
+> **Pico 4 users running our own XIAO / OpenIris hardware**: please use a **standard driver-free UVC
+> camera** (verified working) or the firmware's built-in **WiFi streaming mode**. Standard UVC cameras
+> are unaffected by this issue.
 
 Android 10 also adds a gate for UVC-class devices (AOSP `UsbUserSettingsManager`): with
 `targetSdk >= 28` the app must already hold the `CAMERA` runtime permission. This app lowers

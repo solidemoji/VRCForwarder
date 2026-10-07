@@ -67,7 +67,14 @@ VRChat 面捕 / 眼追软件直接拉流使用。
 > **补充说明**：此前有用户反馈 Pico 4「能识别到设备插入，但相机列表为空」——我们在实机上复现后确认，
 > **该现象只出现在我们自家 XIAO 固件（USB 复合描述符：CDC + UVC）上**：Android 10 的 USB 枚举
 > 不会暴露这类复合描述符中的 VideoStreaming 接口（**同一份固件在 Windows 与 Android 14 上枚举完全正常**）。
-> 这与相机兼容性无关，属于**自家固件描述符与 Android 10 枚举层的兼容问题**，仍在排查中。
+>
+> 我们随后做了穷举验证 —— **有/无 CDC × BULK/ISO 传输 × alt 布局，共 5 个固件版本全部失败**；
+> 系统侧日志可看到 AOSP 的 `UsbDescriptorParser` 在该描述符上抛
+> `NegativeArraySizeException` 并中止解析（先把 CDC 的 `0x24` 类描述符误判为音频类而失步）。
+> 因此最终结论：**Android 10 的 USB 枚举层不会暴露该固件的视频流接口，App 侧无法解决。**
+>
+> **使用自家 XIAO / OpenIris 硬件的 Pico 4 用户**：请改用**标准免驱 UVC 相机**（已实测通过），
+> 或使用固件自带的 **WiFi 推流模式**。标准 UVC 相机不受此问题影响。
 >
 > 另外，Android 10 对 UVC 类设备有一道额外门禁（AOSP `UsbUserSettingsManager`）：
 > `targetSdk >= 28` 的应用需先取得 `CAMERA` 运行时权限；本 App 已把 `targetSdk` 压到 **27** 并同时申请该权限，

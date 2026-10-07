@@ -75,7 +75,9 @@
 
 > 此前"能识别设备但相机列表为空"的反馈，经实机复现确认**只出现在我们自家 XIAO 固件（USB 复合描述符）上**：
 > Android 10 的 USB 枚举不会暴露该复合描述符里的 VideoStreaming 接口（同一份固件在 Windows 与 Android 14 上枚举完全正常）。
-> 与相机兼容性无关，属自家固件的兼容问题，仍在排查。
+> 随后做了穷举验证（有/无 CDC × BULK/ISO × alt 布局，**5 个固件版本全部失败**），
+> 系统日志显示 AOSP 解析器在该描述符上抛异常并中止解析 ⇒ **App 侧无法解决**。
+> 用自家 XIAO / OpenIris 硬件的 Pico 4 用户请改用**标准免驱 UVC 相机**或固件的 **WiFi 推流模式**。
 
 Android 10 对 UVC 类设备另有一道门禁（AOSP `UsbUserSettingsManager`）：`targetSdk >= 28` 需先取得
 `CAMERA` 运行时权限。本 App 已把 `targetSdk` 压到 **27** 并同时申请该权限，实测无阻碍。
