@@ -96,6 +96,10 @@ public class IsoUvcSession {
     private volatile boolean running = false;
     /** 是否已记录帧形态（只记一次，避免刷屏） */
     private volatile boolean frameFormLogged = false;
+    /** 当前期望的帧尺寸（试错循环里会变，帧回调按它判断 YUY2 形态） */
+    private volatile int curW = 640, curH = 480;
+    /** 最近一帧到达时间；试错循环用它判断"是不是真的收到帧"（0=还没收到） */
+    private volatile long firstFrameAt = 0;
 
     private long statFrames = 0;
     private long statBytes = 0;
@@ -172,29 +176,27 @@ public class IsoUvcSession {
             int w, h;
             int[] wh = null;
 
-            // ★★ 系统枚举失败（接口数为 0）的设备：不信任能力表协商，直接用**实测有效的那组参数**。
-            //    实测 GC0308 / Pico 4 / Android 10（2026-10-07）：
-            //      · 自动协商选出的 MJPEG 320x240@120 → setPreviewSize 失败、拿不到帧 ✗
-            //      · 手动指定 MJPEG 640x480@30 → 出流正常、PC 端收到画面 ✓（用户实测）
-            //      · 不设尺寸（saki 默认 YUYV 640x480）→ App 侧也能出流 ✓
-            //    所以这里主动设成 640x480@30 MJPEG；若设不上则什么都不设、退回 saki 默认。
             final boolean rawDevice = (device.getInterfaceCount() == 0);
+            // ★★ 系统枚举失败（接口数为 0）的设备：**只试一次**，用实测有效的那组参数。
+            //    ⚠️ 不要在这里"反复试多个规格"：这颗相机（GC0308 免驱模组）的驱动在
+            //    setPreviewSize 失败 / 预览中止后会留下残留（实测 release_interface errno=22、
+            //    紧接着的 open 报 err=-99），越试越坏，最后整个会话都起不来（用户实测崩溃）。
+            //    用户手动之所以能成功，正是因为在干净状态下**只试了一次**。
+            //    需要试错的话必须「关掉设备 → 重新 openDevice → 再试下一档」，且只在这种
+            //    坏描述符设备上做，不能像现在这样在同一会话里连试。
             if (rawDevice) {
-                boolean setOk = false;
                 try {
-                    camera.setPreviewSize(640, 480, 1, 30, UVCCamera.FRAME_FORMAT_MJPEG, 1.0f);
-                    setOk = true;
-                    Log.i(TAG, "接口数为 0（系统枚举失败）：采用实测有效规格 MJPEG 640x480@30");
-                } catch (Throwable t) {
-                    Log.w(TAG, "0 接口设备设 640x480@30 失败，退回 saki 默认: " + t);
-                }
-                wh = new int[]{640, 480};
-                if (setOk) {
-                    // 已按上面的规格设好，后面的能力表/旧协商都不再执行
+                    curW = 640;
+                    curH = 480;
+                    camera.setPreviewSize(640, 480, 1, 30,
+                            UVCCamera.FRAME_FORMAT_MJPEG, 1.0f);
+                    wh = new int[]{640, 480};
                     activeSpecText = "MJPEG 640x480@30";
+                    Log.i(TAG, "0 接口设备（系统枚举失败）：采用实测有效规格 MJPEG 640x480@30（单次尝试）");
+                } catch (IllegalArgumentException e) {
+                    Log.w(TAG, "0 接口设备设 640x480@30 被拒（不重试，避免设备残留）: "
+                            + e.getMessage() + " → 退回 saki 默认");
                 }
-            } else {
-                wh = null;   // 非 0 接口设备：走原有协商流程
             }
 
             // ⓪ 最高优先：用户在「规格」UI 里手动指定过 → 照办（设置失败则自动接棒）
@@ -217,7 +219,7 @@ public class IsoUvcSession {
             //    这修正了旧逻辑的致命缺陷：旧逻辑按固定尺寸顺序 + 一成功就 break，
             //    在"小尺寸高帧率"的相机上会抢先选到低帧率档
             //    （GC0308 实测踩到：640x480 被接受但只有 30fps，320x240@120 从未被尝试）。
-            if (wh == null) {
+            if (wh == null && !rawDevice) {
                 UvcDescriptors.Choice c =
                         UvcDescriptors.selectBest(capabilityTable, TARGET_FPS, MAX_W, MAX_H);
                 if (c != null) {
@@ -248,33 +250,37 @@ public class IsoUvcSession {
                 }
             }
 
-            // ② 回退：旧协商逻辑（原样保留，保证不回归）
-            if (wh == null) {
+            // ② 回退：旧协商逻辑（仅非 0 接口设备；0 接口设备交给下面的试错循环）
+            if (wh == null && !rawDevice) {
                 wh = negotiateBySakiList(device);
             }
-            if (wh == null) {
+            if (wh == null && !rawDevice) {
                 // 连 saki 尺寸列表都拿不到：沿用历史硬编码值
                 camera.setPreviewSize(640, 400, 1, TARGET_FPS,
                         UVCCamera.FRAME_FORMAT_MJPEG, 1.0f);
                 wh = new int[]{640, 400};
             }
-            w = wh[0];
-            h = wh[1];
-            if (activeSpecText == null) {
-                activeSpecText = w + "x" + h;
+            if (wh != null) {
+                w = wh[0];
+                h = wh[1];
+                if (activeSpecText == null) {
+                    activeSpecText = w + "x" + h;
+                }
+                curW = w;
+                curH = h;
             }
-            final int fw = w, fh = h;
             // 无头模式关键：saki native 预览循环依赖 Surface 窗口启动传输；
-            // 给一个虚拟 SurfaceTexture 占位（不消费帧，仅触发 ISO 拉流）
-            dummyTexture = new android.graphics.SurfaceTexture(0);
-            camera.setPreviewTexture(dummyTexture);
-            camera.setFrameCallback(frame -> {
+            // 给一个虚拟 SurfaceTexture 占位（不消费帧，仅触发 ISO 拉流）。
+            // ★ 顺序关键：必须**先 setPreviewSize、再 setPreviewTexture/startPreview**
+            //   （实测：先把 Surface 绑上、之后再设尺寸 → 每一档候选都收不到帧）。
+            com.serenegiant.usb.IFrameCallback frameCb = frame -> {
                 if (!opened) return;
                 try {
                     int n = frame.remaining();
                     if (n <= 0) return;
                     byte[] data = new byte[n];
                     frame.get(data);
+                    firstFrameAt = System.currentTimeMillis();   // ★ 出帧信号：试错循环的判据
                     byte[] out = null;
                     if (data.length >= 2 && (data[0] & 0xFF) == 0xFF && (data[1] & 0xFF) == 0xD8) {
                         if (!frameFormLogged) {
@@ -283,23 +289,23 @@ public class IsoUvcSession {
                                     + data.length);
                         }
                         out = data; // 原始 JPEG（部分设备/版本直接给）
-                    } else if (data.length == fw * fh * 2) {
+                    } else if (data.length == curW * curH * 2) {
                         if (!frameFormLogged) {
                             frameFormLogged = true;
-                            Log.i(TAG, "帧形态 = 解码后 YUY2（" + fw + "x" + fh
+                            Log.i(TAG, "帧形态 = 解码后 YUY2（" + curW + "x" + curH
                                     + "，2B/px）→ 软编码为 JPEG");
                         }
                         // 解码后 YUY2：直接软编码为 JPEG（YuvImage 原生支持 YUY2，零转换）
                         android.graphics.YuvImage yi = new android.graphics.YuvImage(
-                                data, android.graphics.ImageFormat.YUY2, fw, fh, null);
+                                data, android.graphics.ImageFormat.YUY2, curW, curH, null);
                         java.io.ByteArrayOutputStream bos =
                                 new java.io.ByteArrayOutputStream(64 * 1024);
-                        yi.compressToJpeg(new android.graphics.Rect(0, 0, fw, fh),
+                        yi.compressToJpeg(new android.graphics.Rect(0, 0, curW, curH),
                                 JPEG_QUALITY, bos);
                         out = bos.toByteArray();
                     } else {
                         Log.w(TAG, "未知帧形态 len=" + data.length + " 期望YUY2="
-                                + (fw * fh * 2));
+                                + (curW * curH * 2));
                     }
                     if (out != null && out.length >= 2 && (out[0] & 0xFF) == 0xFF
                             && (out[1] & 0xFF) == 0xD8) {
@@ -319,11 +325,76 @@ public class IsoUvcSession {
                 } catch (Exception e) {
                     Log.e(TAG, "帧回调异常: " + e);
                 }
-            }, UVCCamera.PIXEL_FORMAT_RAW);
-            camera.startPreview();
+            };
+
+            // 试错循环：**故意停用**（trialCands 恒为 null）——原因见上面的说明：
+            // 在同一会话里连试多个规格，会把这类坏驱动设备越试越坏（用户实测崩溃）。
+            // 代码保留，供以后在「每次尝试都完整重开设备」的前提下重新启用。
+            java.util.List<int[]> trialCands = null;
+            if (trialCands != null) {
+                // ★★ 规格试错循环：判据是**真的收到帧**（不是 setPreviewSize 没抛异常 —— 本次踩坑就在这）
+                //    且**每次尝试前必须完全重开设备**：这颗相机的驱动在 setPreviewSize 失败 /
+                //    预览被中止后会留下残留（实测 release_interface errno=22、下一次 open 报 err=-99），
+                //    不重开的话「反复试」会越试越坏 —— 这正是旧自动协商失败的真实机制，
+                //    而用户手动之所以行，是因为他在干净状态下**只试了一次**。
+                int tried = 0;
+                for (int[] s : trialCands) {
+                    if (tried > 0) {
+                        if (!reopenCamera(device)) {
+                            Log.w(TAG, "重开设备失败，跳过 " + specName(s));
+                            continue;
+                        }
+                    }
+                    tried++;
+                    boolean setOk = true;
+                    if (s[0] >= 0) {
+                        curW = s[1];
+                        curH = s[2];
+                        try {
+                            camera.setPreviewSize(curW, curH, 1, Math.max(1, s[3]), s[0], 1.0f);
+                            Log.i(TAG, "试规格 " + specName(s) + " …");
+                        } catch (IllegalArgumentException e) {
+                            Log.w(TAG, "试规格 " + specName(s) + " → saki 拒绝: " + e.getMessage());
+                            setOk = false;
+                        }
+                    } else {
+                        Log.i(TAG, "试规格 saki 默认（不指定尺寸）…");
+                    }
+                    if (!setOk) continue;
+
+                    firstFrameAt = 0;
+                    if (!bindAndStart(frameCb)) continue;  // 绑 Surface + 回调 + startPreview
+                    long t0 = System.currentTimeMillis();
+                    while (firstFrameAt == 0 && System.currentTimeMillis() - t0 < 1800) {
+                        try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+                    }
+                    if (firstFrameAt != 0) {
+                        wh = new int[]{curW, curH};
+                        activeSpecText = specName(s);
+                        Log.i(TAG, "★★ 规格试错命中: " + specName(s)
+                                + "（1.8 秒内收到真实帧，判据=帧计数）");
+                        break;
+                    }
+                    Log.w(TAG, "试规格 " + specName(s) + " → 1.8 秒内无帧，换下一档");
+                    try { camera.stopPreview(); } catch (Throwable ignored) {}
+                }
+                if (wh == null) {
+                    Log.e(TAG, "✗ 所有候选规格都试过，均未出帧（该设备可能不支持 ISO 取流）");
+                }
+            } else {
+                bindAndStart(frameCb);
+            }
+
+            if (wh != null) {
+                curW = wh[0];
+                curH = wh[1];
+            }
             opened = true;
             statStart = System.currentTimeMillis();
-            notifyState("ISO 摄像头 " + fw + "x" + fh + " 出流(YUY2->JPEG 编码)");
+            notifyState("ISO 摄像头 " + curW + "x" + curH + " 出流(YUY2->JPEG 编码)");
+            if (activeSpecText != null) {
+                notifyState("当前规格 " + activeSpecText);
+            }
         } catch (Exception e) {
             Log.e(TAG, "openCamera 失败", e);
             notifyState("ISO 摄像头打开失败: " + e.getMessage());
@@ -361,6 +432,112 @@ public class IsoUvcSession {
      *
      * @return {w,h}；拿不到尺寸列表时返回 null
      */
+    /**
+     * 从能力表生成候选规格列表（供 0 接口设备的试错循环用）。
+     *
+     * <p>排序偏好：MJPEG 优先（带宽小、更易成功）→ 面积大的优先 → 帧率高的优先。
+     * 末尾追加"不指定尺寸"兜底档（退回 saki 默认），保证永远有最后一手。
+     *
+     * @return 每项 {frameFormat, w, h, fps}；frameFormat 为 -1 表示这一档不调用 setPreviewSize
+     */
+    private java.util.List<int[]> buildSpecCandidates(
+            java.util.List<UvcDescriptors.Format> table) {
+        java.util.List<int[]> out = new java.util.ArrayList<>();
+        if (table != null) {
+            java.util.List<int[]> mjpeg = new java.util.ArrayList<>();
+            java.util.List<int[]> other = new java.util.ArrayList<>();
+            for (UvcDescriptors.Format f : table) {
+                if (f.frames == null) continue;
+                for (UvcDescriptors.Frame fr : f.frames) {
+                    if (fr.width <= 0 || fr.height <= 0) continue;
+                    int fps = fr.maxFpsInt();
+                    if (fps <= 0) fps = 30;
+                    int[] s = new int[]{f.frameFormat, fr.width, fr.height, fps};
+                    if (f.frameFormat == UvcDescriptors.FRAME_FORMAT_MJPEG) {
+                        mjpeg.add(s);
+                    } else {
+                        other.add(s);
+                    }
+                }
+            }
+            java.util.Comparator<int[]> byArea = (a, b) -> (b[1] * b[2]) - (a[1] * a[2]);
+            java.util.Collections.sort(mjpeg, byArea);
+            java.util.Collections.sort(other, byArea);
+            out.addAll(mjpeg);
+            out.addAll(other);
+        }
+        out.add(new int[]{-1, 0, 0, 0});
+        return out;
+    }
+
+    /**
+     * 完全关闭并重新打开相机（试错循环每次换档前必须做）。
+     *
+     * <p>原因：这颗相机（GC0308 免驱模组）的驱动在 `setPreviewSize` 失败或预览被中止后会留下残留
+     * —— 实测 `release_interface` 返回 errno=22、紧接着的 `open` 报 `err=-99`。
+     * 只 `stopPreview()` 不足以清除；必须关掉 UVCCamera 与 UsbControlBlock 再重新 openDevice。
+     *
+     * @return 重新打开成功返回 true
+     */
+    private boolean reopenCamera(UsbDevice device) {
+        try { if (camera != null) { try { camera.stopPreview(); } catch (Throwable ignored) {} } } catch (Throwable ignored) {}
+        try { if (camera != null) { camera.close(); } } catch (Throwable ignored) {}
+        camera = null;
+        try { if (ctrlBlock != null) { ctrlBlock.close(); } } catch (Throwable ignored) {}
+        ctrlBlock = null;
+        try {
+            ctrlBlock = monitor.openDevice(device);
+            if (ctrlBlock == null) return false;
+            camera = new UVCCamera();
+            camera.open(ctrlBlock);
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "重开设备失败: " + t);
+            return false;
+        }
+    }
+
+    /**
+     * 绑虚拟 SurfaceTexture + 注册帧回调 + 起流（试错循环每档都要按这个顺序重来一遍）。
+     *
+     * <p>★ 顺序不能颠倒：实测「先绑 Surface、再 setPreviewSize」会导致**每一档都收不到帧**
+     * —— 必须先 setPreviewSize，再 setPreviewTexture + startPreview。
+     *
+     * @return 成功起流返回 true
+     */
+    private boolean bindAndStart(com.serenegiant.usb.IFrameCallback cb) {
+        try {
+            if (dummyTexture != null) {
+                try { dummyTexture.release(); } catch (Throwable ignored) {}
+                dummyTexture = null;
+            }
+            dummyTexture = new android.graphics.SurfaceTexture(0);
+            camera.setPreviewTexture(dummyTexture);
+            camera.setFrameCallback(cb, UVCCamera.PIXEL_FORMAT_RAW);
+            camera.startPreview();
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "绑定 Surface / 起流失败: " + t);
+            return false;
+        }
+    }
+
+    /** 候选档的可读名字 */
+    private static String specName(int[] s) {
+        if (s[0] < 0) return "saki 默认";
+        return (s[0] == UvcDescriptors.FRAME_FORMAT_MJPEG ? "MJPEG" : "YUYV")
+                + " " + s[1] + "x" + s[2] + "@" + s[3];
+    }
+
+    private static String candsText(java.util.List<int[]> l) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < l.size(); i++) {
+            if (i > 0) b.append(" > ");
+            b.append(specName(l.get(i)));
+        }
+        return b.toString();
+    }
+
     private int[] negotiateBySakiList(UsbDevice device) {
         List<Size> sizes = camera.getSupportedSizeList();
         if (sizes == null || sizes.isEmpty()) return null;
