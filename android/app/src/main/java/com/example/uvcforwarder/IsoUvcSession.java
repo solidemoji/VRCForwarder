@@ -221,6 +221,16 @@ public class IsoUvcSession {
                 UvcDescriptors.Choice c =
                         UvcDescriptors.selectBest(capabilityTable, TARGET_FPS, MAX_W, MAX_H);
                 if (c != null) {
+                    // ★ 诊断：把实际传给 saki 的实参打出来 —— 自动协商一直失败的原因必须靠实证定位
+                    //   （这颗相机的描述符自相矛盾：dwDefaultFrameInterval=333333/30fps，
+                    //     但 dwFrameInterval[] 列表是 83333/120fps）
+                    Log.i(TAG, "能力表候选实参: w=" + c.frame.width + " h=" + c.frame.height
+                            + " minFps=1 maxFps=" + c.fps
+                            + " format=" + c.format.frameFormat
+                            + " | 该帧 maxFpsInt=" + c.frame.maxFpsInt()
+                            + " defaultInterval=" + c.frame.defaultInterval
+                            + " fpsText=" + c.frame.fpsText()
+                            + " | describe=" + c.describe());
                     try {
                         camera.setPreviewSize(c.frame.width, c.frame.height, 1, c.fps,
                                 c.format.frameFormat, 1.0f);
