@@ -168,6 +168,16 @@ public class IsoUvcSession {
 
     private void openCamera(UsbDevice device, USBMonitor.UsbControlBlock cb) {
         try {
+            // ★ 防御：ctrlBlock 为空时 saki 内部会直接 NPE 崩溃 —— 实测栈：
+            //   UVCCamera.open(UVCCamera.java:214)
+            //     → USBMonitor$UsbControlBlock.getVenderId() on a null object reference
+            //   多发于设备在"打开过程中被拔掉"或会话被并发关闭。
+            if (cb == null) {
+                Log.w(TAG, "ctrlBlock 为空，放弃打开（设备可能在打开过程中被拔出）");
+                notifyState("打开失败：设备已断开");
+                running = false;
+                return;
+            }
             camera = new UVCCamera();
             camera.open(cb);
             // saki 的能力枚举（诊断用；★ 注意它**不含帧率**，只有尺寸）

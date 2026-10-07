@@ -384,10 +384,15 @@ public class MainActivity extends AppCompatActivity {
                 if (list.get(0).epType == 2) {
                     r = RawUvc.claimAndRead(c, list.get(0));
                 } else {
-                    // ★ 注意：不要在这里再开一个 UVCCamera 做实验 —— 它会占住设备，
-                    //   导致真正的 IsoUvcSession 打开失败（实测 nativeConnect 返回 -99）。
-                    //   需要复验原生栈时用 testSakiNativeOnDevice()，且必须先停掉转发。
-                    r = RawUvc.streamIsoLibusb(c, list);
+                    // ★★★ 绝不要在这里跑 libusb ISO 探针 —— 这是历史遗留的实验代码，
+                    //    实测（2026-10-07，Pico 4 + GC0308）会造成两个严重后果：
+                    //      · 它对设备做 claim / setAlt / probe / commit / ISO 读，
+                    //        与随后 IsoUvcSession 启动的 **saki 原生栈抢同一颗相机**；
+                    //      · saki 的 setPreviewSize 因此被拒（Failed to set preview size）、
+                    //        收不到画面，并在 uvc-slots 线程上 Fatal signal 6 (SIGABRT) 崩溃。
+                    //    ISO 取流一律交给 saki（见 IsoUvcSession）；这里只需要上面已经做完的
+                    //   「读原始描述符 + 记端点类型」两件事。
+                    r = "（ISO 取流交给 saki 原生栈；此处不再跑 libusb 探针）";
                 }
                 Log.i(TAG, "★★ 绕过探针结果: " + r);
             } catch (Throwable t) {
@@ -920,14 +925,19 @@ public class MainActivity extends AppCompatActivity {
             //   2.5 秒后无论是否收到回调都尝试继续；仍未授权就给一句明确提示。
             final String name = dev.getDeviceName();
             tvStatus.postDelayed(() -> {
-                if (name.equals(pendingSingleName)) {
-                    pendingSingleName = null;
-                    Log.w(TAG, "单设备授权回调超时，仍尝试继续: " + name);
-                    if (usbManager.hasPermission(dev)) {
-                        startDeviceAction(dev, UvcProto.DEVICE_ACTION_START);
-                    } else {
-                        tvStatus.setText(getString(R.string.msg_perm_denied_device, name));
+                try {
+                    if (name.equals(pendingSingleName)) {
+                        pendingSingleName = null;
+                        Log.w(TAG, "单设备授权回调超时，仍尝试继续: " + name);
+                        if (usbManager.hasPermission(dev)) {
+                            startDeviceAction(dev, UvcProto.DEVICE_ACTION_START);
+                        } else {
+                            tvStatus.setText(getString(R.string.msg_perm_denied_device, name));
+                        }
                     }
+                } catch (Throwable t) {
+                    // 设备可能在超时窗口内被拔掉 —— 这里绝不能让异常冒到 UI 线程（会崩）
+                    Log.w(TAG, "授权超时兜底执行异常（已忽略）: " + t);
                 }
             }, 2500);
             return;
