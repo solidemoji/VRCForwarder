@@ -110,7 +110,14 @@ public class UvcStreamer {
                 if (ep.getType() == UsbConstants.USB_ENDPOINT_XFER_ISOC) return UvcKind.ISO;
             }
         }
-        if (!hasVideo) return UvcKind.NONE;
+        if (!hasVideo) {
+            // ★ 0 接口设备（系统枚举失败）：「应用侧绕过」探针从原始描述符解析出的端点类型
+            //   能把它正确归类 —— BULK 走原始描述符回退、ISO 走 saki 原生栈，两者都实测可用。
+            //   所以这类设备不再是"不可用"，而是普通相机。
+            Integer raw = RawUvc.rawEndpointType(d);
+            if (raw != null) return (raw == 2) ? UvcKind.BULK : UvcKind.ISO;
+            return UvcKind.NONE;
+        }
 
         // ---- 兜底：有 UVC 视频接口但系统没暴露流接口端点 ----
         if (isKnownBulkUvc(d)) return UvcKind.BULK;   // XIAO / OpenIris 等自研 bulk 固件

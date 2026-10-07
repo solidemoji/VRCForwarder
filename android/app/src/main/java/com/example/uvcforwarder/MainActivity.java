@@ -290,6 +290,68 @@ public class MainActivity extends AppCompatActivity {
     private static final boolean DEBUG_BYPASS_ALL_CAMERAS = false;
 
     /**
+     * ★ 实验：把相机交给**已验证能读 ISO 的 saki/libuvc 原生栈**试一次。
+     *
+     * <p>意义：OV9281 在这台 Pico 4 上经这条通路跑到 120fps，说明「设备 + 内核 + 原生 ISO 读取」
+     * 这条链路本身是通的。把它指向 GC0308：
+     * <ul>
+     *   <li>读到帧 → 问题在**我们自己那条 libusb 实现**里（可修）</li>
+     *   <li>也读不到 → 问题在**相机/内核**这一层（选型时要避开这类模组）</li>
+     * </ul>
+     *
+     * <p>与 {@link IsoUvcSession} 的区别：不依赖系统枚举出的接口（saki native 自己按 fd 解析），
+     * 所以 0 接口设备也能试；也不读能力表、不做规格选择，只问一件事：**有没有字节出来**。
+     */
+    private void testSakiNativeOnDevice(UsbDevice d) {
+        new Thread(() -> {
+            com.serenegiant.usb.USBMonitor mon = null;
+            try {
+                Log.i(TAG, "saki 实验: 开始，设备 " + d.getDeviceName());
+                // 注意：USBMonitor 构造时会注册广播接收器，监听器不能传 null（插拔事件会 NPE）
+                mon = new com.serenegiant.usb.USBMonitor(this,
+                        new com.serenegiant.usb.USBMonitor.OnDeviceConnectListener() {
+                            public void onAttach(UsbDevice device) {}
+                            public void onDettach(UsbDevice device) {}
+                            public void onConnect(UsbDevice device,
+                                                  com.serenegiant.usb.USBMonitor.UsbControlBlock ctrlBlock,
+                                                  boolean createNewFile) {}
+                            public void onDisconnect(UsbDevice device,
+                                                     com.serenegiant.usb.USBMonitor.UsbControlBlock ctrlBlock) {}
+                            public void onCancel(UsbDevice device) {}
+                        });
+                com.serenegiant.usb.USBMonitor.UsbControlBlock cb = mon.openDevice(d);
+                if (cb == null) {
+                    Log.w(TAG, "saki 实验: openDevice 返回 null（权限/占用）");
+                    return;
+                }
+                com.serenegiant.usb.UVCCamera cam = new com.serenegiant.usb.UVCCamera();
+                cam.open(cb);
+                Log.i(TAG, "saki 实验: camera.open OK（native 已按 fd 解析描述符）");
+                final int[] cnt = {0};
+                cam.setFrameCallback(frame -> {
+                    int n = (frame != null) ? frame.limit() : -1;
+                    cnt[0]++;
+                    if (cnt[0] <= 3 || cnt[0] % 60 == 0) {
+                        Log.i(TAG, "saki 实验: ★★ 收到帧 #" + cnt[0] + " " + n + " 字节");
+                    }
+                }, com.serenegiant.usb.UVCCamera.PIXEL_FORMAT_RAW);
+                android.graphics.SurfaceTexture st = new android.graphics.SurfaceTexture(0);
+                cam.setPreviewTexture(st);      // saki 需绑定 Surface 才启动等时传输（无头占位）
+                cam.startPreview();             // 此版本 startPreview 不带参数
+                Log.i(TAG, "saki 实验: startPreview 已发出，等 8 秒看有没有帧…");
+                Thread.sleep(8000);
+                Log.i(TAG, "saki 实验: ★ 结论 —— 共收到 " + cnt[0] + " 帧"
+                        + (cnt[0] > 0 ? "（原生栈能读 ⇒ 我们自己实现的问题）"
+                                      : "（原生栈也读不到 ⇒ 相机/内核层问题）"));
+            } catch (Throwable t) {
+                Log.e(TAG, "saki 实验异常: " + t);
+            } finally {
+                try { if (mon != null) mon.unregister(); } catch (Throwable ignored) {}
+            }
+        }, "saki-test").start();
+    }
+
+    /**
      * ★★「应用侧绕过」探针（后台线程）。
      *
      * <p>系统没暴露接口时，用**我们自己从原始描述符解析出的接口号**去反射 claim 并试读一次。
@@ -308,15 +370,25 @@ public class MainActivity extends AppCompatActivity {
                 byte[] cfg = UvcDescriptors.readConfig(c);
                 java.util.List<UvcDescriptors.ItfInfo> list =
                         UvcDescriptors.findStreamingInterfaces(cfg);
+                // ★ 把端点类型记下来：供 classify() 给系统枚举失败的设备正确归类
+                RawUvc.rememberRawEndpointType(d, list);
+                // 归类变了（NONE → BULK/ISO）要让列表重建，这类设备就不再显示"不可用"了
+                runOnUiThread(MainActivity.this::refreshDeviceList);
                 if (list.isEmpty()) {
                     Log.w(TAG, "绕过探针: 原始描述符里没有「带流端点的视频流接口」");
                     return;
                 }
                 Log.i(TAG, "绕过探针: " + d.getDeviceName() + " → " + list.get(0));
                 // BULK → Java bulkTransfer；ISO → libusb（Android API 不支持 ISO）
-                String r = (list.get(0).epType == 2)
-                        ? RawUvc.claimAndRead(c, list.get(0))
-                        : RawUvc.streamIsoLibusb(c, list);
+                String r;
+                if (list.get(0).epType == 2) {
+                    r = RawUvc.claimAndRead(c, list.get(0));
+                } else {
+                    // ★ 注意：不要在这里再开一个 UVCCamera 做实验 —— 它会占住设备，
+                    //   导致真正的 IsoUvcSession 打开失败（实测 nativeConnect 返回 -99）。
+                    //   需要复验原生栈时用 testSakiNativeOnDevice()，且必须先停掉转发。
+                    r = RawUvc.streamIsoLibusb(c, list);
+                }
                 Log.i(TAG, "★★ 绕过探针结果: " + r);
             } catch (Throwable t) {
                 Log.e(TAG, "绕过探针异常: " + t);

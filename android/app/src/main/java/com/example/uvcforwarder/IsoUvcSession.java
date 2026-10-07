@@ -172,6 +172,31 @@ public class IsoUvcSession {
             int w, h;
             int[] wh = null;
 
+            // ★★ 系统枚举失败（接口数为 0）的设备：不信任能力表协商，直接用**实测有效的那组参数**。
+            //    实测 GC0308 / Pico 4 / Android 10（2026-10-07）：
+            //      · 自动协商选出的 MJPEG 320x240@120 → setPreviewSize 失败、拿不到帧 ✗
+            //      · 手动指定 MJPEG 640x480@30 → 出流正常、PC 端收到画面 ✓（用户实测）
+            //      · 不设尺寸（saki 默认 YUYV 640x480）→ App 侧也能出流 ✓
+            //    所以这里主动设成 640x480@30 MJPEG；若设不上则什么都不设、退回 saki 默认。
+            final boolean rawDevice = (device.getInterfaceCount() == 0);
+            if (rawDevice) {
+                boolean setOk = false;
+                try {
+                    camera.setPreviewSize(640, 480, 1, 30, UVCCamera.FRAME_FORMAT_MJPEG, 1.0f);
+                    setOk = true;
+                    Log.i(TAG, "接口数为 0（系统枚举失败）：采用实测有效规格 MJPEG 640x480@30");
+                } catch (Throwable t) {
+                    Log.w(TAG, "0 接口设备设 640x480@30 失败，退回 saki 默认: " + t);
+                }
+                wh = new int[]{640, 480};
+                if (setOk) {
+                    // 已按上面的规格设好，后面的能力表/旧协商都不再执行
+                    activeSpecText = "MJPEG 640x480@30";
+                }
+            } else {
+                wh = null;   // 非 0 接口设备：走原有协商流程
+            }
+
             // ⓪ 最高优先：用户在「规格」UI 里手动指定过 → 照办（设置失败则自动接棒）
             UvcSpecPrefs.Spec manual = UvcSpecPrefs.parse(
                     UvcSpecPrefs.get(context, UvcStreamer.deviceKey(device)));

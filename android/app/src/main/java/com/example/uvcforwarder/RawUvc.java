@@ -208,6 +208,32 @@ public final class RawUvc {
      }
 
      /**
+      * 设备 → 原始描述符里解析出的流端点类型（2=BULK / 1=ISO）。
+      *
+      * <p>用途：系统枚举失败的设备（接口数 0）在 {@link UvcStreamer#classify} 里原本只能判 NONE
+      * → 进「不可用」名单、不提供转发。有了这张表就能正确归类：
+      * BULK 走原始描述符回退，ISO 走 saki 原生栈（两者都实测可用）。
+      */
+     private static final java.util.concurrent.ConcurrentHashMap<String, Integer> RAW_EP_TYPE =
+             new java.util.concurrent.ConcurrentHashMap<>();
+
+     /** 查询该设备原始描述符里的流端点类型；没记录过返回 null */
+     public static Integer rawEndpointType(android.hardware.usb.UsbDevice d) {
+         // ★ 键必须用设备节点名，**绝不能**用 UvcStreamer.deviceKey() ——
+         //   后者内部会调用 classify()，而本方法正是被 classify() 调用的 ⇒ 无限递归
+         //   （实测 StackOverflowError: classify → rawEndpointType → deviceKey → classify）。
+         return (d == null) ? null : RAW_EP_TYPE.get(d.getDeviceName());
+     }
+
+     /** 记录原始描述符解析结果（不重新读设备） */
+     public static void rememberRawEndpointType(android.hardware.usb.UsbDevice d,
+                                                java.util.List<UvcDescriptors.ItfInfo> list) {
+         if (d == null || list == null || list.isEmpty()) return;
+         RAW_EP_TYPE.put(d.getDeviceName(), list.get(0).epType);
+         Log.i(TAG, "记录原始描述符端点类型: " + d.getDeviceName() + " epType=" + list.get(0).epType);
+     }
+
+     /**
       * ★★ 应用侧绕过（转发链路入口）：系统视图里找不到可用的视频流端点时，
       * 自己读原始配置描述符，解析出带流端点的 VideoStreaming 接口，
       * 并用反射构造出对应的 {@link UsbInterface}/{@link UsbEndpoint}，

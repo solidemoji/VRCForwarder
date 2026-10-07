@@ -67,8 +67,13 @@ android {
         //        ② ★ 关键教训：回退必须**排在 findAnyBulkIn 之前** —— 系统丢了 VS 接口时
         //           「任意接口找 bulk-IN」会在 CDC 数据接口上找到端点（陷阱），
         //           probe 发到错误接口号 → s1/s2/GET 全 -1。
-        versionCode 9
-        versionName "0.0.7"
+        //        ③ ★ ISO 相机（免驱模组）同样能救：系统枚举失败（接口数 0）的设备不再判为
+        //           不可用，按原始描述符解析出的端点类型归类 —— BULK 走原始描述符回退，
+        //           ISO 交给 saki/libuvc 原生栈（= 已在跑 120fps 的那条通路，不需要自写 libusb）。
+        //           ★ 且这类设备不信任能力表协商：实测 GC0308 协商出 MJPEG 320x240@120 设不上、
+        //             拿不到帧；改成直接设 MJPEG 640x480@30 后正常出流，PC 端收到画面。
+        versionCode 10
+        versionName "0.0.8"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
