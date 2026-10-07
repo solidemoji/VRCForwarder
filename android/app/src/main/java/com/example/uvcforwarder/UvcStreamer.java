@@ -396,9 +396,24 @@ public class UvcStreamer {
                 break;
             }
         }
+        // ★★ 原始描述符回退（应用侧绕过）—— **必须排在 findAnyBulkIn 之前**：
+        //    系统丢了 VS 接口时，findAnyBulkIn 会在 CDC 数据接口上找到一个 bulk-IN，
+        //    那是个陷阱（probe/commit 会发到错误接口号 → s1/s2/GET 全 -1）。
+        //    我们自解析出的 VS 接口号 + 端点才是正确的。实测 Pico 4 / Android 10 + XIAO：
+        //    走这条回退 claim 成功、probe/commit=26、bulkTransfer 读到真实帧数据。
+        UsbInterface rawClaim = null;
         if (bulkIn == null) {
-            // ★ Pico 4 Pro 兜底：system 未暴露 VS 接口时，vsInterface 实际是 VC 接口，
-            //   其上没有端点。退化为「在设备任意接口上找 bulk-IN」（含 CDC 二级兜底）。
+            RawUvc.RawItf raw = RawUvc.buildRawStreamingInterface(dev, connection);
+            if (raw != null && raw.epType == 2) {      // 只在 BULK 时接管（ISO 另有路径）
+                bulkIn = raw.endpoint;
+                rawClaim = raw.itf;
+                probeWIndex = raw.itfNum;              // 协商必须发到这个接口号
+                Log.i(TAG, "★★ 启用原始描述符回退：接口" + raw.itfNum + " 端点0x"
+                        + Integer.toHexString(raw.epAddr) + " type=" + raw.epType);
+            }
+        }
+        if (bulkIn == null) {
+            // 最后的兜底：在设备任意接口上找 bulk-IN（含 CDC 二级兜底）
             bulkIn = findAnyBulkIn(dev);
         }
         if (bulkIn == null) {
@@ -409,7 +424,7 @@ public class UvcStreamer {
 
         // 找到该端点所属的接口 —— 必须 claim「它所在的接口」，否则 bulkTransfer 会失败。
         // （兜底场景下端点可能挂在 CDC Data 接口上，此时不能只 claim VC 接口。）
-        UsbInterface epOwner = interfaceOf(dev, bulkIn);
+        UsbInterface epOwner = (rawClaim != null) ? rawClaim : interfaceOf(dev, bulkIn);
         UsbInterface toClaim = (epOwner != null) ? epOwner : vsInterface;
         Log.i(TAG, "将 claim 接口 id=" + toClaim.getId()
                 + " class=" + toClaim.getInterfaceClass()

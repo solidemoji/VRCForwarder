@@ -270,7 +270,62 @@ public class MainActivity extends AppCompatActivity {
         boolean ok = rawHasVideo(d);
         Log.i(TAG, "0 接口设备 " + d.getDeviceName()
                 + " 原始描述符含视频接口=" + ok + "（已授权，据此决定是否列出）");
+        if (ok && probedRaw.add(d.getDeviceName())) {   // 每台设备只探一次
+            tryBypass(d);
+        }
         return ok;
+    }
+
+    /** 已「绕过探针」过的设备名，避免每次刷新都重复 probe */
+    private final java.util.Set<String> probedRaw = new java.util.HashSet<>();
+
+    /**
+     * ★ 对照实验开关：对本机**系统已正常识别**的相机也跑一次 libusb 绕过探针。
+     *
+     * <p>目的：验证「libusb 等时通路本身」是否成立 —— 拿一台已知能用的相机
+     * （例如 OV9281）走同一条代码路径，如果读到数据，说明通路没问题、
+     * 问题出在特定相机的内核支持上；如果也读不到，说明问题在我们的实现里。
+     * 验证完请改回 false。
+     */
+    private static final boolean DEBUG_BYPASS_ALL_CAMERAS = false;
+
+    /**
+     * ★★「应用侧绕过」探针（后台线程）。
+     *
+     * <p>系统没暴露接口时，用**我们自己从原始描述符解析出的接口号**去反射 claim 并试读一次。
+     * 这是整个「绕过」功能的命门：只要 claim 能成功，后续就能在这条通道上做 UVC 协商 + 取流，
+     * 完全不经过 Android 的接口枚举。
+     */
+    private void tryBypass(UsbDevice d) {
+        new Thread(() -> {
+            UsbDeviceConnection c = null;
+            try {
+                c = usbManager.openDevice(d);
+                if (c == null) {
+                    Log.w(TAG, "绕过探针: openDevice 失败");
+                    return;
+                }
+                byte[] cfg = UvcDescriptors.readConfig(c);
+                java.util.List<UvcDescriptors.ItfInfo> list =
+                        UvcDescriptors.findStreamingInterfaces(cfg);
+                if (list.isEmpty()) {
+                    Log.w(TAG, "绕过探针: 原始描述符里没有「带流端点的视频流接口」");
+                    return;
+                }
+                Log.i(TAG, "绕过探针: " + d.getDeviceName() + " → " + list.get(0));
+                // BULK → Java bulkTransfer；ISO → libusb（Android API 不支持 ISO）
+                String r = (list.get(0).epType == 2)
+                        ? RawUvc.claimAndRead(c, list.get(0))
+                        : RawUvc.streamIsoLibusb(c, list);
+                Log.i(TAG, "★★ 绕过探针结果: " + r);
+            } catch (Throwable t) {
+                Log.e(TAG, "绕过探针异常: " + t);
+            } finally {
+                if (c != null) {
+                    try { c.close(); } catch (Throwable ignored) {}
+                }
+            }
+        }, "raw-uvc-probe").start();
     }
 
     /** 已授权设备：开一次临时连接，读原始描述符确认它是不是相机 */
@@ -316,6 +371,32 @@ public class MainActivity extends AppCompatActivity {
         why.setTextColor(isDarkMode() ? 0xFFEF5350 : 0xFFC62828);
         why.setTextSize(12);
         row.addView(why);
+
+        // ★ 未授权时给一个「授权」按钮 —— Pico/Quest 这类 VR 系统**不会**为
+        //   requestPermission() 弹权限框，必须由 App 主动发起（用户戴着头显点一下）。
+        if (!usbManager.hasPermission(dev)) {
+            android.widget.Button b = new android.widget.Button(this);
+            b.setText(R.string.btn_grant);
+            b.setTextSize(12);
+            b.setAllCaps(false);
+            b.setBackgroundResource(R.drawable.bg_button_outline);
+            b.setTextColor(getColorRes(R.color.text_primary));
+            b.setPadding(dp(14), dp(6), dp(14), dp(6));
+            b.setMinWidth(0);
+            b.setMinimumWidth(0);
+            LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            blp.topMargin = dp(8);
+            b.setLayoutParams(blp);
+            b.setOnClickListener(v -> {
+                Log.i(TAG, "手动请求 USB 权限: " + dev.getDeviceName());
+                pendingAuth.clear();
+                pendingAuth.add(dev);
+                requestNext();
+            });
+            row.addView(b);
+        }
         return row;
     }
 
@@ -450,6 +531,18 @@ public class MainActivity extends AppCompatActivity {
         if (deviceList == null) return;
         deviceList.removeAllViews();
         List<UsbDevice> cams = findCameras();
+        // ★ 对照实验（见 DEBUG_BYPASS_ALL_CAMERAS）：对已暴露相机也跑一次 libusb 绕过探针
+        if (DEBUG_BYPASS_ALL_CAMERAS) {
+            for (UsbDevice d : usbManager.getDeviceList().values()) {
+                if (d.getInterfaceCount() > 0
+                        && UvcStreamer.classify(d) != UvcStreamer.UvcKind.NONE
+                        && usbManager.hasPermission(d)
+                        && probedRaw.add(d.getDeviceName())) {
+                    Log.i(TAG, "对照实验：对系统已识别的相机也跑绕过探针 " + d.getDeviceName());
+                    tryBypass(d);
+                }
+            }
+        }
         if (cams.isEmpty()) {
             TextView tv = new TextView(this);
             tv.setText(R.string.hint_no_device);

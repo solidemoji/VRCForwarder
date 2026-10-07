@@ -335,6 +335,133 @@ public final class UvcDescriptors {
     }
 
     /** 一站式：读 + 解析（含日志） */
+    /** 从原始描述符里解析出的「视频流接口 + 流端点」信息（供 {@link RawUvc} 绕过系统枚举用） */
+    public static final class ItfInfo {
+        public int itfNum, alt;
+        public int epAddr, epAttrs, epType, epMaxPacket, epInterval;
+
+        // ↓ 该流接口的**默认**格式/帧（从 VS format/frame 描述符解析，供 UVC probe/commit 用）
+        public int fmtIndex = 1;
+        public int frameIndex = 1;
+        public int width = 640, height = 480;
+        public int maxFrameSize = 640 * 480;      // dwMaxVideoFrameSize
+        public long interval100ns = 166666;       // 100ns 单位（默认 60fps）
+
+        @Override
+        public String toString() {
+            return "接口" + itfNum + "/alt" + alt + " 端点0x" + Integer.toHexString(epAddr)
+                    + " type=" + epType + " maxPacket=" + epMaxPacket
+                    + " interval=" + epInterval
+                    + " | fmt" + fmtIndex + "/frame" + frameIndex
+                    + " " + width + "x" + height + "@" + fps() + "fps"
+                    + " maxFrame=" + maxFrameSize;
+        }
+
+        private int fps() {
+            return interval100ns > 0 ? (int) (10000000L / interval100ns) : 0;
+        }
+    }
+
+    /** VS 帧描述符（仅内部用，用于挑 default 帧） */
+    private static final class FrameDesc {
+        int idx, w, h, maxFrame;
+        long iv;
+    }
+
+    private static long le32(byte[] b, int o) {
+        return (b[o] & 0xFFL) | ((b[o + 1] & 0xFFL) << 8)
+                | ((b[o + 2] & 0xFFL) << 16) | ((b[o + 3] & 0xFFL) << 24);
+    }
+
+    /** 公开的原始配置描述符读取（给绕过路径复用；失败返回 null） */
+    public static byte[] readConfig(android.hardware.usb.UsbDeviceConnection conn) {
+        return readConfigDescriptor(conn);
+    }
+
+    /**
+     * 从原始配置描述符里找出**带流端点的视频流接口**（bInterfaceClass=0x0E, bSubClass=0x02）。
+     *
+     * <p>用途：Android 没把接口暴露给应用时（见 {@link #hasVideoInterface}），
+     * App 自己按这些编号去 claim —— 这就是「应用侧绕过」的数据来源。
+     */
+    public static List<ItfInfo> findStreamingInterfaces(byte[] cfg) {
+        List<ItfInfo> out = new ArrayList<>();
+        if (cfg == null) return out;
+        int curItf = -1, curAlt = -1, curCls = -1, curSub = -1;
+        // 当前 VS 格式及其帧列表（用于把 probe/commit 需要的 format/frame 一并解析出来）
+        int curFmtIdx = 1, curDefFrame = 1;
+        List<FrameDesc> frames = new ArrayList<>();
+        for (int i = 0; i + 1 < cfg.length; ) {
+            int len = cfg[i] & 0xFF;
+            int type = cfg[i + 1] & 0xFF;
+            if (len < 2 || i + len > cfg.length) break;
+            if (type == DT_INTERFACE && len >= 9) {
+                curItf = cfg[i + 2] & 0xFF;
+                curAlt = cfg[i + 3] & 0xFF;
+                curCls = cfg[i + 5] & 0xFF;
+                curSub = cfg[i + 6] & 0xFF;
+                if (!(curCls == 0x0E && curSub == 0x02)) {   // 离开 VS 接口 → 清空格式上下文
+                    curFmtIdx = 1;
+                    curDefFrame = 1;
+                    frames = new ArrayList<>();
+                }
+            } else if (type == CS_INTERFACE && curCls == 0x0E && curSub == 0x02 && len >= 3) {
+                int st = cfg[i + 2] & 0xFF;
+                if (st == VS_FORMAT_MJPEG && len >= 7) {
+                    // MJPEG: [3]=bFormatIndex [4]=bNumFrameDescriptors [5]=bmFlags [6]=bDefaultFrameIndex
+                    curFmtIdx = cfg[i + 3] & 0xFF;
+                    curDefFrame = cfg[i + 6] & 0xFF;
+                    frames = new ArrayList<>();
+                } else if (st == VS_FORMAT_UNCOMPRESSED && len >= 23) {
+                    // 未压缩: [3]=bFormatIndex [4]=bNumFrameDescriptors [5..20]=GUID [21]=bpp [22]=bDefaultFrameIndex
+                    curFmtIdx = cfg[i + 3] & 0xFF;
+                    curDefFrame = cfg[i + 22] & 0xFF;
+                    frames = new ArrayList<>();
+                } else if ((st == 0x07 /*VS_FRAME_MJPEG*/ || st == 0x05 /*VS_FRAME_UNCOMPRESSED*/)
+                        && len >= 25) {
+                    // 两种 frame 描述符的字段偏移一致：宽高在 5/7，maxFrameSize 在 17，默认间隔在 21
+                    FrameDesc fd = new FrameDesc();
+                    fd.idx = cfg[i + 3] & 0xFF;
+                    fd.w = (cfg[i + 5] & 0xFF) | ((cfg[i + 6] & 0xFF) << 8);
+                    fd.h = (cfg[i + 7] & 0xFF) | ((cfg[i + 8] & 0xFF) << 8);
+                    fd.maxFrame = (int) le32(cfg, i + 17);
+                    fd.iv = le32(cfg, i + 21);
+                    frames.add(fd);
+                }
+            } else if (type == 0x05 && len >= 7 && curCls == 0x0E && curSub == 0x02) {
+                int addr = cfg[i + 2] & 0xFF;
+                if ((addr & 0x80) != 0) {              // IN 端点（相机 → 主机）
+                    ItfInfo f = new ItfInfo();
+                    f.itfNum = curItf;
+                    f.alt = curAlt;
+                    f.epAddr = addr;
+                    f.epAttrs = cfg[i + 3] & 0xFF;
+                    f.epType = f.epAttrs & 0x03;       // 0=控制 1=ISO 2=BULK 3=中断
+                    f.epMaxPacket = (cfg[i + 4] & 0xFF) | ((cfg[i + 5] & 0xFF) << 8);
+                    f.epInterval = cfg[i + 6] & 0xFF;
+                    // ★ 带上该流接口的默认格式/帧（probe/commit 必须有真实值，否则相机不出流）
+                    FrameDesc pick = null;
+                    for (FrameDesc fd : frames) {
+                        if (fd.idx == curDefFrame) { pick = fd; break; }
+                    }
+                    if (pick == null && !frames.isEmpty()) pick = frames.get(0);
+                    if (pick != null) {
+                        f.fmtIndex = curFmtIdx;
+                        f.frameIndex = pick.idx;
+                        f.width = pick.w;
+                        f.height = pick.h;
+                        f.maxFrameSize = pick.maxFrame > 0 ? pick.maxFrame : pick.w * pick.h;
+                        if (pick.iv > 0) f.interval100ns = pick.iv;
+                    }
+                    out.add(f);
+                }
+            }
+            i += len;
+        }
+        Log.i(TAG, "从原始描述符解析出 " + out.size() + " 个流端点: " + out);
+        return out;
+    }
+
     /**
      * ★ 只回答一个问题：这份**原始配置描述符**里有没有 UVC 视频接口（bInterfaceClass=0x0E）？
      *

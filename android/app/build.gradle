@@ -10,6 +10,17 @@ android {
         }
     }
 
+    // ★ 原生层（应用侧绕过）：libusb 做 ISO 传输 —— Android 的 UsbRequest 不支持等时端点。
+    //   本机 NDK 25.1；cmake 用 SDK 里已装的 4.1.2。
+    ndkVersion "25.1.8937393"
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "4.1.2"
+        }
+    }
+
     defaultConfig {
         applicationId "com.example.uvcforwarder"
         minSdk 28
@@ -47,10 +58,29 @@ android {
         //        ② 「系统未暴露接口」的相机不再静默消失：接口数为 0 时用 GET_DESCRIPTOR
         //           自读原始描述符确认它是不是相机，是就列出来并标注原因（Pico 4/Android 10
         //           实测：部分相机描述符会让系统解析器抛 IllegalArgumentException → 0 接口）
-        versionCode 8
-        versionName "0.0.6"
+        //      0.0.7 (code 9)：★★「应用侧绕过」功能落地 —— Android 10 丢接口不再等于不可用
+        //        ① 系统视图里找不到可用视频流端点时，自己读配置描述符解析出 VS 接口号/端点，
+        //           用反射构造 UsbInterface/UsbEndpoint 后 claim，走完标准 probe/commit 握手。
+        //           ★ 实测 Pico 4 / Android 10 + 自家 XIAO 固件（系统只暴露 3 接口、缺 VS）：
+        //             claim 接口3 成功 → probe/commit=26 → bulkTransfer 持续读到帧数据，
+        //             PC 端接收器实测 8 秒收到 1.45MB 真实 MJPEG（≈180KB/s）。
+        //        ② ★ 关键教训：回退必须**排在 findAnyBulkIn 之前** —— 系统丢了 VS 接口时
+        //           「任意接口找 bulk-IN」会在 CDC 数据接口上找到端点（陷阱），
+        //           probe 发到错误接口号 → s1/s2/GET 全 -1。
+        versionCode 9
+        versionName "0.0.7"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // ★ 原生层：只出 arm64（Pico / Quest / 手机均为 arm64）；libusb 源码路径见 cpp/CMakeLists.txt
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+        externalNativeBuild {
+            cmake {
+                arguments "-DLIBUSB_DIR=E:/libusb"
+            }
+        }
     }
 
     // 侧载自签名（本机自用，非商店发布）：长期有效 30 年
