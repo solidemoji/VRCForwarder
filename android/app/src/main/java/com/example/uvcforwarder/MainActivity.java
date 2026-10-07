@@ -279,7 +279,16 @@ public class MainActivity extends AppCompatActivity {
         if (ok && probedRaw.add(d.getDeviceName())) {   // 每台设备只探一次
             tryBypass(d);
         }
-        return ok;
+        // ★★ 即使读到"没有视频接口"也**照样列出**（用户实测根因，2026-10-07）：
+        //   这类复合设备（自家 XIAO、GC0308 免驱模组）**先枚举 CDC/串口部分，
+        //   UVC 接口要等重新枚举后才出现**。日志实证：
+        //     19:34:23.711 /001/003 含视频接口=false
+        //     19:34:23.746 USB 拔出: /001/003      ← 35ms 后重枚举
+        //     19:34:24.053 USB 插入: /001/004
+        //     19:34:27.803 /001/004 含视频接口=true
+        //   所以"读到 false"≠"不是相机"，只是"这一刻还没枚举完"。
+        //   判"它不是相机"这种事交给会话阶段实测，界面不替用户下结论。
+        return true;
     }
 
     /** 已「绕过探针」过的设备名，避免每次刷新都重复 probe */
@@ -656,8 +665,18 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         for (UsbDevice d : cams) {
-            deviceList.addView(UvcStreamer.classify(d) == UvcStreamer.UvcKind.NONE
-                    ? buildUnusableRow(d) : buildDeviceRow(d));
+            // ★★ 0 接口设备（系统枚举失败的复合设备，如 XIAO / GC0308 免驱模组）
+            //   **必须**走普通行（带「转发」按钮）：
+            //   · 它们的 classify() 按接口判断必然返回 NONE（系统没给接口），
+            //     但实际是能用的 —— 走不可用行会显示"系统未暴露接口，无法使用"，
+            //     而用户实测这条通路是好的（GC0308 走 saki、XIAO 走 BULK 回退）。
+            //   · 是否真的能用，交给会话阶段实测，界面不替用户下结论。
+            boolean unusable = UvcStreamer.classify(d) == UvcStreamer.UvcKind.NONE
+                    && d.getInterfaceCount() > 0;
+            Log.i(TAG, "列表行: " + d.getDeviceName() + " 接口数=" + d.getInterfaceCount()
+                    + " classify=" + UvcStreamer.classify(d)
+                    + " → " + (unusable ? "不可用行" : "普通行(可转发)"));
+            deviceList.addView(unusable ? buildUnusableRow(d) : buildDeviceRow(d));
         }
     }
 
