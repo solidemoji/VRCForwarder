@@ -914,6 +914,22 @@ public class MainActivity extends AppCompatActivity {
         if (!usbManager.hasPermission(dev)) {
             pendingSingleName = dev.getDeviceName();
             requestSingleAuth(dev);
+            tvStatus.setText(getString(R.string.msg_perm_wait, dev.getDeviceName()));
+            // ★ 超时兜底（与总开关那条路径一致）：部分系统/设备（如 0 接口的 GC0308）
+            //   连弹窗都不出现，回调永不返回 → 表现为"点了像没反应"。
+            //   2.5 秒后无论是否收到回调都尝试继续；仍未授权就给一句明确提示。
+            final String name = dev.getDeviceName();
+            tvStatus.postDelayed(() -> {
+                if (name.equals(pendingSingleName)) {
+                    pendingSingleName = null;
+                    Log.w(TAG, "单设备授权回调超时，仍尝试继续: " + name);
+                    if (usbManager.hasPermission(dev)) {
+                        startDeviceAction(dev, UvcProto.DEVICE_ACTION_START);
+                    } else {
+                        tvStatus.setText(getString(R.string.msg_perm_denied_device, name));
+                    }
+                }
+            }, 2500);
             return;
         }
         startDeviceAction(dev, UvcProto.DEVICE_ACTION_START);
@@ -925,6 +941,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void requestSingleAuth(UsbDevice dev) {
         Intent intent = new Intent(ACTION_USB_PERMISSION);
+        // ★★ 必须显式限定包名！Android 12+ 对隐式 Intent 有拦截；隐式 PendingIntent 会让
+        //    系统权限对话框**根本不弹**、回调也永不触发 —— 这正是
+        //    「点列表里的转发不弹窗」「GC0308 点了像没反应」的根因
+        //    （总开关那条路径本来就有这行，单设备这条漏了）。
+        intent.setPackage(getPackageName());
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
         PendingIntent pi = PendingIntent.getBroadcast(this, 0, intent, flags);

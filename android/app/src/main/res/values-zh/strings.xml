@@ -28,6 +28,7 @@
     <string name="msg_cameras_found">检测到 %1$d 个摄像头，需逐个授权（%2$d 个待授权），请在弹窗中选允许...</string>
     <string name="msg_usb_attached">检测到 USB 设备插入</string>
     <string name="msg_usb_detached">检测到摄像头拔出，其余路继续转发</string>
+    <string name="msg_perm_wait">等待授权：%1$s</string>
     <string name="msg_perm_denied_device">设备被拒绝授权: %1$s</string>
     <string name="msg_perm_denied_some">有摄像头被拒绝授权，跳过该路继续</string>
     <string name="msg_setting_up">正在为 %1$s 建立转发...</string>
@@ -71,4 +72,5 @@
     <string name="spec_prefix_manual">手动</string>
     <string name="spec_label">%1$s（%2$s）</string>
     <string name="unusable_reason">系统未暴露接口，无法使用</string>
+    <string name="btn_grant">授权</string>
 </resources>

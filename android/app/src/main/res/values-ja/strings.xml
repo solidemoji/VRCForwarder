@@ -28,6 +28,7 @@
     <string name="msg_cameras_found">カメラを %1$d 台検出。1台ずつ許可が必要です（%2$d 台待機中）。ダイアログで許可してください...</string>
     <string name="msg_usb_attached">USBデバイスを検出</string>
     <string name="msg_usb_detached">カメラが外れました — 他のストリームは継続します</string>
+    <string name="msg_perm_wait">権限の許可待ち：%1$s</string>
     <string name="msg_perm_denied_device">許可が拒否されました: %1$s</string>
     <string name="msg_perm_denied_some">許可が拒否されたカメラをスキップして続行します</string>
     <string name="msg_setting_up">%1$s の転送を準備中...</string>
@@ -71,4 +72,5 @@
     <string name="spec_prefix_manual">手動</string>
     <string name="spec_label">%1$s（%2$s）</string>
     <string name="unusable_reason">システムがインターフェースを公開していません</string>
+    <string name="btn_grant">許可</string>
 </resources>

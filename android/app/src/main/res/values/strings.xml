@@ -34,6 +34,7 @@
     <string name="msg_cameras_found">Detected %1$d camera(s), authorization needed one by one (%2$d pending). Please allow in the dialogs...</string>
     <string name="msg_usb_attached">USB device attached</string>
     <string name="msg_usb_detached">Camera detached — other streams keep forwarding</string>
+    <string name="msg_perm_wait">Waiting for permission: %1$s</string>
     <string name="msg_perm_denied_device">Permission denied: %1$s</string>
     <string name="msg_perm_denied_some">A camera was denied — skipping it, continuing</string>
     <string name="msg_setting_up">Setting up forwarding for %1$s...</string>
@@ -81,4 +82,5 @@
     <string name="spec_prefix_manual">Manual</string>
     <string name="spec_label">%1$s (%2$s)</string>
     <string name="unusable_reason">Interface not exposed by the system</string>
+    <string name="btn_grant">Grant access</string>
 </resources>
