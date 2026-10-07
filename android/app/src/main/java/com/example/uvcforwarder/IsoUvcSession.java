@@ -146,10 +146,24 @@ public class IsoUvcSession {
             //   用一次性的 UsbDeviceConnection（读完即关），避免与 UVCCamera 持有的连接互相干扰
             readCapabilities();
             Log.i(TAG, target.getDeviceName() + " ISO start: openDevice...");
-            ctrlBlock = monitor.openDevice(target);   // 内部 openDevice + UsbControlBlock
+            // ★★ 这些复合设备（自家 XIAO / GC0308 免驱模组）会**自己重枚举**：
+            //    CDC 串口先出、UVC 接口后到，且重枚举会换设备节点。
+            //    实测日志：openDevice 返回 null → 紧接着 "USB 拔出 /001/008" → "USB 插入 /001/009"。
+            //    当下放弃就是白等一次用户点击（还表现为"卡一会儿"）。
+            //    这里退避重试，等它枚举完成。（本方法跑在 uvc-slots 后台线程上）
+            for (int attempt = 0; attempt < 3 && running; attempt++) {
+                ctrlBlock = monitor.openDevice(target);
+                if (ctrlBlock != null) break;
+                Log.w(TAG, target.getDeviceName() + " ISO start: openDevice 返回 null（第 "
+                        + (attempt + 1) + " 次），设备可能正在重枚举，等 800ms 再试");
+                try {
+                    Thread.sleep(800);
+                } catch (InterruptedException ignored) {
+                }
+            }
             if (ctrlBlock == null) {
-                notifyState("openDevice 返回 null（设备可能正被占用）");
-                Log.w(TAG, target.getDeviceName() + " ISO start: openDevice null");
+                notifyState("打开失败：设备未就绪（可能正在重枚举或已被拔出）");
+                Log.w(TAG, target.getDeviceName() + " ISO start: openDevice 最终为 null");
                 running = false;
                 return;
             }

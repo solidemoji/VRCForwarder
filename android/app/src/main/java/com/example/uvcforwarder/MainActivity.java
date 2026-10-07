@@ -97,6 +97,17 @@ public class MainActivity extends AppCompatActivity {
                 tvStatus.setText(R.string.msg_usb_attached);
                 btnToggle.setEnabled(true);
                 refreshDeviceList();
+                // ★★ 设备重新枚举后是**新的设备实例**，Android 的 USB 授权不继承
+                //    ⇒ 列表里会凭空多出一台「待授权」的相机，用户觉得"掉授权了"。
+                //    这里在插入事件里**立刻主动发起授权**：弹窗马上出现（不用用户自己找），
+                //    授权成功后自动把这一路转起来（requestSingleAuth 的既有流程）。
+                UsbDevice justAttached = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                if (justAttached != null && !usbManager.hasPermission(justAttached)
+                        && isCameraLike(justAttached)) {
+                    Log.i(TAG, "新插入（可能重枚举）的相机，主动请求授权: " + justAttached.getDeviceName());
+                    pendingSingleName = justAttached.getDeviceName();
+                    requestSingleAuth(justAttached);
+                }
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
                 // 不再停整个服务：UsbForwardService 已支持单路热拔管理(只停被拔那路)
                 tvStatus.setText(R.string.msg_usb_detached);
@@ -289,6 +300,17 @@ public class MainActivity extends AppCompatActivity {
         //   所以"读到 false"≠"不是相机"，只是"这一刻还没枚举完"。
         //   判"它不是相机"这种事交给会话阶段实测，界面不替用户下结论。
         return true;
+    }
+
+    /** 轻量判断：这台设备像不像相机（用于插入事件里决定要不要主动发起授权，避免乱弹窗） */
+    private boolean isCameraLike(UsbDevice d) {
+        // 0 接口的复合设备（系统枚举失败那类，如 XIAO / GC0308）：按设备类过滤，
+        // 排除 hub(9)/HID(3)/存储(8) 等明确不是相机的东西。
+        if (d.getInterfaceCount() == 0) {
+            int cls = d.getDeviceClass();
+            return cls == 0 || cls == 0xEF;
+        }
+        return UvcStreamer.classify(d) != UvcStreamer.UvcKind.NONE;
     }
 
     /** 已「绕过探针」过的设备名，避免每次刷新都重复 probe */

@@ -105,8 +105,16 @@ android {
         //          ① maybeUnparsedCamera() 即使读到 false 也照样列出（不替用户下结论）；
         //          ② 列表行判定加 d.getInterfaceCount() > 0 —— 0 接口设备一律走普通行
         //             （带「转发」按钮），彻底消除"系统未暴露接口，无法使用"这条误导提示。
-        versionCode 14
-        versionName "0.0.12"
+        //      0.0.13 (code 15)：修「列表开关卡一会儿 / 像掉了授权」
+        //        实证（logcat，22:13:54）：设备自己重枚举 ——
+        //          ISO 打开失败(getVenderId null) → USB 拔出 /001/008 → USB 插入 /001/009
+        //        ⇒ 新节点是**新的设备实例**，Android 的 USB 授权不继承，所以看起来"掉授权"。
+        //        ① IsoUvcSession.start(): openDevice 返回 null 时退避重试 3×800ms
+        //           （重枚举期间的失败不再直接放弃 → 不再白等一次用户点击）；
+        //        ② MainActivity 插入事件：识别为重枚举的相机且未授权 → **立刻主动发起授权**
+        //           （弹窗马上出现），授权后自动把该路转起来（既有 requestSingleAuth 流程）。
+        versionCode 15
+        versionName "0.0.13"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
