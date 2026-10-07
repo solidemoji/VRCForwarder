@@ -62,30 +62,38 @@ desktop software such as **Baballonia, OpenIris, or VRCFaceTracking** can consum
 
 ## Device Compatibility
 
-**We have only tested the two devices below on our own hardware. Every other model is
+**Everything marked ✅ below has been verified on real hardware by us. Unlisted models are
 unverified — please download it, try it, and report back.**
 
 | Device | OS | Status |
 |---|---|---|
 | **Pico 4 Ultra** | PICO OS 5 / Android 14 | ✅ Verified working |
 | **Quest 3 / 3S** | Horizon OS / Android 14 | ✅ Verified working (validated on Quest 3S) |
-| **Pico 4** | Android 10 | ❓ Untested |
+| **Pico 4** | **Android 10 / PICO OS 5.13.7** | ✅ **Verified working** (standard UVC camera: OV9281, MJPEG 640×480@120, measured **100–121 fps**) |
 | **Pico 4 Pro** | PICO OS 4 / Android 10 | ❓ Untested |
 | **Quest 2** | Horizon OS | ❓ Untested |
 | Other Android phones / tablets | Android 9 or newer | ❓ Untested |
 
-**About Pico 4 / 4 Pro**: an **older APK build was tested on one of these and failed**
-(the device plug-in is detected, but the camera list stays empty).
+**About Pico 4 (Android 10)**: we bought a Pico 4 (`A8110 / Phoenix`, **Android 10 / SDK 29,
+PICO OS 5.13.7**) specifically to test this:
 
-Android 10 adds an **extra gate for UVC-class devices** (see AOSP `UsbUserSettingsManager`):
-when `targetSdk >= 28` the app must already hold the `CAMERA` runtime permission, otherwise USB
-permission for the device is denied; with **`targetSdk <= 27` the check is skipped entirely**.
-The current build therefore **lowers `targetSdk` to 27**, removing that dependency.
+- A standard driver-free UVC camera (OV9281) enumerates **completely** — video control interface
+  plus video streaming interface (multiple alternate settings with ISO endpoints);
+- capability read-out, automatic profile selection and streaming all work:
+  **MJPEG 640×480@120, measured 100–121 fps**, matching our Quest 3S baseline.
 
-That said, what we observed on the customer's device was an interface list (system side, via
-`dumpsys usb`) that was **missing the UVC video-streaming interface** — if the failure happens in
-the kernel/vendor layer, no app-side change can help. We have **no Android 10 device to verify
-against**, so this is honestly marked *untested* rather than supported or unsupported.
+> The earlier "device is detected but the camera list stays empty" report reproduced **only with our
+> own XIAO firmware (a USB composite descriptor: CDC + UVC)**: Android 10's USB enumeration does not
+> expose the VideoStreaming interface of such a composite descriptor, **while the very same firmware
+> enumerates correctly on Windows and on Android 14**. This is unrelated to camera compatibility — it
+> is a firmware-descriptor/Android-10 enumeration issue that is still being investigated.
+
+Android 10 also adds a gate for UVC-class devices (AOSP `UsbUserSettingsManager`): with
+`targetSdk >= 28` the app must already hold the `CAMERA` runtime permission. This app lowers
+`targetSdk` to **27** *and* requests that permission, so it passes either way in practice.
+
+**About Pico 4 Pro**: **untested**. It is the same Android 10 generation and should behave like the
+Pico 4, but we **do not extrapolate from untested hardware**.
 
 > The app's `minSdk` is **28 (Android 9.0)** — systems below that cannot install it.
 

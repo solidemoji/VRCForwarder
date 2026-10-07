@@ -57,26 +57,30 @@
 
 ## 机型支持情况
 
-**我们只在自己手上的设备实测过下面两款，其余机型均未验证 —— 欢迎下载测试并反馈。**
+**下列已标 ✅ 的机型都是我们拿实机跑通的；未列出的机型欢迎下载测试并反馈。**
 
 | 机型 | 系统 | 状态 |
 |---|---|---|
 | **Pico 4 Ultra** | PICO OS 5 / Android 14 | ✅ 已实测通过 |
 | **Quest 3 / 3S** | Horizon OS / Android 14 | ✅ 已实测通过（本机验证机型为 Quest 3S） |
-| **Pico 4** | Android 10 | ❓ 未测试 |
+| **Pico 4** | **Android 10 / PICO OS 5.13.7** | ✅ **已实测通过**（标准 UVC 相机：OV9281，MJPEG 640×480@120，实测 100–121 fps） |
 | **Pico 4 Pro** | PICO OS 4 / Android 10 | ❓ 未测试 |
 | **Quest 2** | Horizon OS | ❓ 未测试 |
 | 其它安卓手机 / 平板 | Android 9 及以上 | ❓ 未测试 |
 
-**关于 Pico 4 / 4 Pro**：此前用旧版本 APK 实测失败（能识别到设备插入，但相机列表为空）。
+**关于 Pico 4（Android 10）**：我们专门购入一台 Pico 4（`A8110 / Phoenix`，**Android 10 / SDK 29，PICO OS 5.13.7**）实测：
 
-Android 10 对 **UVC 类设备**多了一道门禁（AOSP `UsbUserSettingsManager` 源码）：
-**`targetSdk >= 28` 的应用必须先拿到 `CAMERA` 运行时权限**，否则该设备的 USB 权限被拒绝；
-**`targetSdk <= 27` 则完全跳过**。当前版本已把 `targetSdk` 压到 **27**，绕开这一依赖。
+- 标准免驱 UVC 相机（OV9281）**枚举完整** —— 视频控制接口 + 视频流接口（多档 alternate setting + ISO 端点）齐全；
+- 能力表读取、自动选档、出流全部正常，**MJPEG 640×480@120，实测 100–121 fps**，与 Quest 3S 基准一致。
 
-不过我们当初在客户机上看到的是**系统侧**接口表里**缺少 UVC 视频流接口** ——
-若失败发生在内核/厂商层，App 侧改不动。我们**没有 Android 10 设备可验证**，
-故如实标为**未测试**，不下「支持/不支持」的结论。
+> 此前"能识别设备但相机列表为空"的反馈，经实机复现确认**只出现在我们自家 XIAO 固件（USB 复合描述符）上**：
+> Android 10 的 USB 枚举不会暴露该复合描述符里的 VideoStreaming 接口（同一份固件在 Windows 与 Android 14 上枚举完全正常）。
+> 与相机兼容性无关，属自家固件的兼容问题，仍在排查。
+
+Android 10 对 UVC 类设备另有一道门禁（AOSP `UsbUserSettingsManager`）：`targetSdk >= 28` 需先取得
+`CAMERA` 运行时权限。本 App 已把 `targetSdk` 压到 **27** 并同时申请该权限，实测无阻碍。
+
+**关于 Pico 4 Pro**：**未测试**。同为 Android 10 世代，理论应与 Pico 4 表现一致，但我们**不在未实测的情况下作推断**。
 
 > 本 App 的 `minSdk` 为 **28（Android 9.0）**，低于此版本的系统无法安装。
 

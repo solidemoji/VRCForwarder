@@ -43,32 +43,40 @@ VRChat 面捕 / 眼追软件直接拉流使用。
 
 ## 机型支持情况
 
-**先说结论：我们只在自己的设备上实测过下列两款；其余机型均未验证 —— 欢迎下载测试并反馈。**
+**先说结论：下列已标 ✅ 的机型都是我们拿实机跑通的；未列出的机型欢迎下载测试并反馈。**
 
 | 机型 | 系统 | 状态 |
 |---|---|---|
 | **Pico 4 Ultra** | PICO OS 5 / Android 14 | ✅ **已实测通过** |
 | **Quest 3 / 3S** | Horizon OS / Android 14 | ✅ **已实测通过**（本机验证机型为 Quest 3S） |
-| **Pico 4** | Android 10 | ❓ 未测试 |
-| **Pico 4 Pro** | PICO OS 4 / Android 10 | ❓ 未测试（见下） |
+| **Pico 4** | **Android 10 / PICO OS 5.13.7** | ✅ **已实测通过**（标准 UVC 相机：OV9281，MJPEG 640×480@120，实测 **100–121 fps**） |
+| **Pico 4 Pro** | PICO OS 4 / Android 10 | ❓ 未测试 |
 | **Quest 2** | Horizon OS | ❓ 未测试 |
 | 其它安卓手机 / 平板 | Android 9 及以上 | ❓ 未测试 |
 
-### 关于 Pico 4 / 4 Pro（Android 10）
+### 关于 Pico 4（Android 10）—— ✅ 已实测通过
 
-这两款机型**此前用旧版本 APK 已实测失败**：能识别到设备插入，但相机列表为空、点转发立即失败。
+我们专门购入一台 Pico 4（`A8110 / Phoenix`，**Android 10 / SDK 29，PICO OS 5.13.7**）做了完整实测：
 
-Android 10 对 **UVC 类设备**多了一道门禁（见 AOSP `UsbUserSettingsManager` 源码）：
-**`targetSdk >= 28` 的应用必须先拿到 `CAMERA` 运行时权限**，否则该设备的 USB 权限会被拒绝；
-**`targetSdk <= 27` 则完全跳过**这道检查。当前版本已把 `targetSdk` 压到 **27**，彻底绕开这一依赖。
+- ✅ 标准免驱 UVC 相机（OV9281，`0C45:636D`）**枚举完整** —— 视频控制接口 + 视频流接口（多档 alternate setting + ISO 端点）齐全；
+- ✅ 能力表读取、自动选档、出流全部正常，帧率与 Quest 3S 基准一致：**MJPEG 640×480@120，实测 100–121 fps**；
+- ✅ 安装无阻碍（`minSdk 28` ≤ Android 10）。
 
-不过要如实说明：我们当初在客户机上观察到，**系统侧**（`dumpsys usb`）枚举出的接口表里
-**缺少 UVC 的视频流接口** —— 如果失败发生在内核/厂商层，App 侧的任何改动都无能为力。
+**👉 结论：Pico 4（Android 10）可以正常使用标准 UVC 相机。**
 
-因此我们**手上没有 Android 10 设备可验证**，这里**既不下「支持」也不下「不支持」的结论**，
-如实标为**未测试**，欢迎有该机型的用户反馈结果。
+> **补充说明**：此前有用户反馈 Pico 4「能识别到设备插入，但相机列表为空」——我们在实机上复现后确认，
+> **该现象只出现在我们自家 XIAO 固件（USB 复合描述符：CDC + UVC）上**：Android 10 的 USB 枚举
+> 不会暴露这类复合描述符中的 VideoStreaming 接口（**同一份固件在 Windows 与 Android 14 上枚举完全正常**）。
+> 这与相机兼容性无关，属于**自家固件描述符与 Android 10 枚举层的兼容问题**，仍在排查中。
+>
+> 另外，Android 10 对 UVC 类设备有一道额外门禁（AOSP `UsbUserSettingsManager`）：
+> `targetSdk >= 28` 的应用需先取得 `CAMERA` 运行时权限；本 App 已把 `targetSdk` 压到 **27** 并同时申请该权限，
+> 两道都做了，实测无阻碍。
 
-> 如果你有 Pico 4 / Pico 4 Pro，欢迎装上试一下，并在 [Issues](../../issues) 反馈结果。
+### 关于 Pico 4 Pro（Android 10）
+
+**❓ 未测试**。同为 Android 10 世代，理论上应与 Pico 4 表现一致，但我们**尚未在 Pico 4 Pro 上实测**，
+因此如实标注、**不做推断**。如果你手上有该机型，欢迎装上试一下并在 [Issues](../../issues) 反馈。
 
 > 注意：本 App 的 `minSdk` 为 **28（Android 9.0）**，低于此版本的系统无法安装。
 
