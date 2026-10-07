@@ -80,4 +80,5 @@
     <string name="spec_prefix_auto">Auto</string>
     <string name="spec_prefix_manual">Manual</string>
     <string name="spec_label">%1$s (%2$s)</string>
+    <string name="unusable_reason">Interface not exposed by the system</string>
 </resources>

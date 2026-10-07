@@ -231,22 +231,111 @@ public class MainActivity extends AppCompatActivity {
     private List<UsbDevice> findCameras() {
         List<UsbDevice> out = new ArrayList<>();
         for (UsbDevice d : usbManager.getDeviceList().values()) {
-            if (UvcStreamer.classify(d) != UvcStreamer.UvcKind.NONE) out.add(d);
+            if (UvcStreamer.classify(d) != UvcStreamer.UvcKind.NONE) {
+                out.add(d);
+                continue;
+            }
+            // ★ 不再静默丢弃：系统一个接口都没给出来（接口数=0）时，自己读原始描述符
+            //   判断它到底是不是相机。实测 Pico 4 / Android 10 上部分 UVC 相机（含带麦克风的
+            //   复合相机）会让系统解析器抛 IllegalArgumentException → 接口数 0 →
+            //   旧逻辑直接让它从列表消失，用户只会以为 App 坏了。
+            // ★ 注意：这里**绝不能**再要求 usbManager.hasPermission ——
+            //   设备的 USB 权限正是对本函数返回的列表申请的（见 ensureUsbPermission()）。
+            //   要求"已授权"会造成死锁：0 接口的相机永远进不了列表 ⇒ 永不申请权限
+            //   ⇒ 永远没权限 ⇒ 永远进不了列表。现象＝插上相机后列表里什么都没有。
+            if (maybeUnparsedCamera(d)) {
+                out.add(d);
+            }
         }
         return out;
     }
 
+    /**
+     * 0 接口的设备：可能是"系统没解析出接口"的相机。
+     * （Pico 4 / Android 10 实测：部分相机的描述符会让系统解析器抛
+     * {@code IllegalArgumentException} → 系统给出的接口数为 0，任何 App 都拿不到它。）
+     *
+     * <p>⚠️ 本函数**不要求先有 USB 权限** —— 权限正是对本函数返回的设备申请的。
+     * 未授权时先按"疑似"收下（让权限流程覆盖到它），授权后再读原始描述符确认；
+     * 已授权但确认不是相机（例如某些复合扩展坞）则排除。
+     */
+    private boolean maybeUnparsedCamera(UsbDevice d) {
+        if (d.getInterfaceCount() != 0) return false;
+        int cls = d.getDeviceClass();              // 0=按接口定义(复合设备) / 0xEF=杂类(IAD)
+        if (cls != 0 && cls != 0xEF) return false; // 排除 hub(9)/HID(3)/存储(8) 等
+        if (!usbManager.hasPermission(d)) {
+            Log.i(TAG, "0 接口设备（疑似相机，待授权）: " + d.getDeviceName());
+            return true;
+        }
+        boolean ok = rawHasVideo(d);
+        Log.i(TAG, "0 接口设备 " + d.getDeviceName()
+                + " 原始描述符含视频接口=" + ok + "（已授权，据此决定是否列出）");
+        return ok;
+    }
+
+    /** 已授权设备：开一次临时连接，读原始描述符确认它是不是相机 */
+    private boolean rawHasVideo(UsbDevice d) {
+        UsbDeviceConnection c = null;
+        try {
+            c = usbManager.openDevice(d);
+            return UvcDescriptors.hasVideoInterface(c);
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (c != null) {
+                try { c.close(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /**
+     * 系统未暴露接口的相机（Pico 4 / Android 10 上描述符解析失败的那类）：
+     * 只显示名称 + 原因，**不提供转发按钮**（因为没有可用接口，转发必然失败）。
+     */
+    private android.view.View buildUnusableRow(UsbDevice dev) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setBackgroundResource(R.drawable.bg_card_inner);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, 0, dp(8));
+        row.setLayoutParams(lp);
+
+        android.widget.TextView nm = new android.widget.TextView(this);
+        nm.setText(UvcStreamer.deviceDisplayName(dev, null));
+        nm.setTextColor(getColorRes(R.color.text_primary));
+        nm.setTextSize(14);
+        nm.setSingleLine(true);
+        nm.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        row.addView(nm);
+
+        android.widget.TextView why = new android.widget.TextView(this);
+        why.setText(getString(R.string.unusable_reason));
+        why.setTextColor(isDarkMode() ? 0xFFEF5350 : 0xFFC62828);
+        why.setTextSize(12);
+        row.addView(why);
+        return row;
+    }
+
     private void ensurePermissionsThenStart() {
         // ★ USB_CAMERA = Quest (Horizon OS) 外接 UVC 的唯一门禁（dangerous 级，需运行时请求）。
-        // 非 Quest 设备上该权限不存在，checkSelfPermission 会返回 DENIED，
-        // 因此用 try/catch 兼容：拿不到权限名时退化为原有两项，不影响 Pico/手机。
+        // 非 Quest 平台**没有声明**这个权限，必须先探测它是否存在再决定是否请求。
+        // ⚠️ 注意：不能用 checkSelfPermission 的 try/catch 来判断 ——
+        //   它对**不存在的权限名不抛异常**，只返回 DENIED，
+        //   于是 Pico/手机上会永远显示"待授权"、每次启动白跑一轮 requestPermissions。
+        //   正确判据是 getPermissionInfo()：平台没声明该权限时它会抛 NameNotFoundException。
         java.util.List<String> list = new java.util.ArrayList<>();
         list.add(Manifest.permission.CAMERA);
         list.add(Manifest.permission.RECORD_AUDIO);
+        String usbCam = "horizonos.permission.USB_CAMERA";
         try {
-            String usbCam = "horizonos.permission.USB_CAMERA";
-            if (!list.contains(usbCam)) list.add(usbCam);
-        } catch (Throwable ignored) {}
+            getPackageManager().getPermissionInfo(usbCam, 0);   // 平台声明了才加
+            list.add(usbCam);
+        } catch (Exception notDeclaredOnThisPlatform) {
+            // 非 Quest → 静默跳过，不请求、不提示
+        }
         String[] needed = list.toArray(new String[0]);
 
         boolean all = true;
@@ -256,7 +345,7 @@ public class MainActivity extends AppCompatActivity {
                 granted = ContextCompat.checkSelfPermission(this, p)
                         == PackageManager.PERMISSION_GRANTED;
             } catch (Exception e) {
-                // 系统不认识该权限名（非 Quest 设备）→ 视为已满足
+                // 兜底：系统完全不认识该权限名 → 视为已满足
                 granted = true;
             }
             if (!granted) {
@@ -371,7 +460,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         for (UsbDevice d : cams) {
-            deviceList.addView(buildDeviceRow(d));
+            deviceList.addView(UvcStreamer.classify(d) == UvcStreamer.UvcKind.NONE
+                    ? buildUnusableRow(d) : buildDeviceRow(d));
         }
     }
 

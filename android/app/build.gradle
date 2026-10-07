@@ -39,8 +39,16 @@ android {
         //        ③ targetSdk 28 → 27：针对 Android 10「有 CAMERA 权限仍拿不到 UVC USB 权限」
         //          的已知行为（未上机验证，无 Android 10 设备）
         //        ④ 修正教程「必须同一 5GHz Wi-Fi」→ 同一局域网即可
-        versionCode 7
-        versionName "0.0.5"
+        //      0.0.6 (code 8)：
+        //        ① 非 Quest 平台不再请求不存在的 horizonos.permission.USB_CAMERA ——
+        //           原写法用 checkSelfPermission 的 try/catch 兜底，但对**不存在**的权限名
+        //           它并不抛异常、只返回 DENIED ⇒ Pico/手机上永远被判"待授权"，
+        //           每次启动白跑一轮 requestPermissions。改用 getPermissionInfo 探测存在性。
+        //        ② 「系统未暴露接口」的相机不再静默消失：接口数为 0 时用 GET_DESCRIPTOR
+        //           自读原始描述符确认它是不是相机，是就列出来并标注原因（Pico 4/Android 10
+        //           实测：部分相机描述符会让系统解析器抛 IllegalArgumentException → 0 接口）
+        versionCode 8
+        versionName "0.0.6"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

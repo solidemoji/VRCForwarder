@@ -335,6 +335,39 @@ public final class UvcDescriptors {
     }
 
     /** 一站式：读 + 解析（含日志） */
+    /**
+     * ★ 只回答一个问题：这份**原始配置描述符**里有没有 UVC 视频接口（bInterfaceClass=0x0E）？
+     *
+     * <p>用途：Android 10（实测 Pico 4）上部分相机的描述符会让系统解析器抛
+     * {@code IllegalArgumentException} → 系统给出的接口数为 <b>0</b>，此时单看
+     * {@link android.hardware.usb.UsbDevice} 已无法判断它是不是相机。
+     * 这里用 {@code GET_DESCRIPTOR(CONFIGURATION)} 标准控制传输自己读原始描述符（绕开系统解析），
+     * 从而能把这类设备**列出来并标注原因**，而不是静默丢弃。
+     */
+    public static boolean hasVideoInterface(android.hardware.usb.UsbDeviceConnection conn) {
+        if (conn == null) return false;
+        try {
+            byte[] head = new byte[9];
+            // GET_DESCRIPTOR(CONFIGURATION): bmRequestType=0x80, bRequest=0x06, wValue=0x0200, wIndex=0
+            int n = conn.controlTransfer(0x80, 0x06, 0x0200, 0, head, head.length, 1000);
+            if (n < 9 || (head[1] & 0xFF) != DT_CONFIGURATION) return false;
+            int total = (head[2] & 0xFF) | ((head[3] & 0xFF) << 8);
+            if (total < 9 || total > 4096) return false;
+            byte[] cfg = new byte[total];
+            n = conn.controlTransfer(0x80, 0x06, 0x0200, 0, cfg, cfg.length, 2000);
+            if (n < 9) return false;
+            for (int i = 0; i + 5 < n; ) {
+                int len = cfg[i] & 0xFF;
+                if (len < 2) break;
+                if ((cfg[i + 1] & 0xFF) == DT_INTERFACE && (cfg[i + 5] & 0xFF) == 0x0E) return true;
+                i += len;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "读原始描述符失败: " + e);
+        }
+        return false;
+    }
+
     public static List<Format> read(UsbDeviceConnection conn, UsbDevice dev) {
         byte[] cfg = readConfigDescriptor(conn);
         if (cfg == null) {
