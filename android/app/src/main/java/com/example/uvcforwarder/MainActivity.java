@@ -82,7 +82,13 @@ public class MainActivity extends AppCompatActivity {
                                 dev.getDeviceName()));
                     }
                 } else if (granted) {
-                    requestNext(); // 还有设备待授权则继续弹窗，全部完成即启动
+                    // ★ 授权成功就**立刻把这一路加进来**，不再等其余相机都授权完。
+                    //   （设备可能已在转发中，Service 侧会幂等处理。）
+                    if (dev != null) {
+                        Log.i(TAG, "授权成功，立即启动该路: " + dev.getDeviceName());
+                        startDeviceAction(dev, UvcProto.DEVICE_ACTION_START);
+                    }
+                    requestNext(); // 还有设备待授权则继续弹窗
                 } else {
                     tvStatus.setText(R.string.msg_perm_denied_some);
                     requestNext();
@@ -407,17 +413,31 @@ public class MainActivity extends AppCompatActivity {
 
     /** 已授权设备：开一次临时连接，读原始描述符确认它是不是相机 */
     private boolean rawHasVideo(UsbDevice d) {
-        UsbDeviceConnection c = null;
-        try {
-            c = usbManager.openDevice(d);
-            return UvcDescriptors.hasVideoInterface(c);
-        } catch (Exception e) {
-            return false;
-        } finally {
-            if (c != null) {
-                try { c.close(); } catch (Exception ignored) {}
+        // ★ 读描述符 = 一次 USB 控制传输，实测**会偶发失败**（同一台相机 19:34:23 读到 false、
+        //   19:34:27 读到 true）。失败**绝不能**当成「不是相机」—— 那会让设备在列表里
+        //   显示成「系统未暴露接口，无法使用」，而这恰恰是可用的免驱相机（用户实测困惑点）。
+        //   策略：连试 3 次；仍无结论则按「未知」保守当作相机列出，交给会话阶段实测。
+        for (int i = 0; i < 3; i++) {
+            UsbDeviceConnection c = null;
+            try {
+                c = usbManager.openDevice(d);
+                if (c != null) {
+                    if (UvcDescriptors.hasVideoInterface(c)) return true;
+                    if (i == 2) {
+                        Log.w(TAG, "读描述符 3 次均报告无视频接口: " + d.getDeviceName());
+                        return false;
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "读描述符第 " + (i + 1) + " 次异常: " + e);
+            } finally {
+                if (c != null) {
+                    try { c.close(); } catch (Exception ignored) {}
+                }
             }
         }
+        Log.w(TAG, "读描述符多次失败 → 按「未知」当相机处理（保守列出）: " + d.getDeviceName());
+        return true;
     }
 
     /**
@@ -540,11 +560,17 @@ public class MainActivity extends AppCompatActivity {
             startForwarding();
             return;
         }
+        // ★★ 不等所有相机都授权完才启动！
+        //   旧行为：队列里每台相机都要等用户点一次弹窗（+ 每次 2.5s 超时兜底），
+        //   全部授权完才 startForwarding() —— 3 台相机就是"点三次 + 等很久才转过来"。
+        //   新行为：先用**已授权**的设备立刻开始转发；未授权的在后台逐个弹窗，
+        //   每授权成功一台就立刻把它那一路加进来（见 receiver 里的 granted 分支）。
         // ★ Quest (Horizon OS)：requestPermission 会立即回调拒绝（1ms，非用户操作），
         // 而 dumpsys 实际已授予权限。故请求后给一个短超时兜底 —— 无论回调如何，
-        // 超时即继续启动转发，由 Service 侧直接尝试 openDevice 实测。
+        // 超时即继续，由 Service 侧直接尝试 openDevice 实测。
         tvStatus.setText(getString(R.string.msg_cameras_found,
                 cams.size(), pendingAuth.size()));
+        startForwarding();
         requestNext();
     }
 
