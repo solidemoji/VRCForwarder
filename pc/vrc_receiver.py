@@ -45,7 +45,7 @@ from PySide6.QtGui import QAction, QColor, QImage, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QPushButton, QScrollArea, QGridLayout, QSystemTrayIcon, QMenu,
-    QStyle, QFrame, QLineEdit, QMessageBox,
+    QStyle, QFrame, QLineEdit, QMessageBox, QPlainTextEdit,
 )
 
 import vrc_protocol as receiver  # 复用: MAGIC/HEADER_LEN/Reassembler/beacon_loop/local_ip 等
@@ -56,7 +56,7 @@ MAX_STREAMS = receiver.MAX_STREAMS
 
 # ★★ 版本号单一口径：界面上会显示（标题栏 / 状态栏常驻 / 中央提示），
 #    打包脚本 read_version 会从这里读出来生成安装包版本 —— 不要在多处手改。
-APP_VERSION = "0.0.8"
+APP_VERSION = "0.0.9"
 
 
 def _candidate_ports(want, span=10):
@@ -799,7 +799,24 @@ class MainWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(container)
-        self.setCentralWidget(scroll)
+
+        # ★★ 窗口底部常驻日志窗（用户建议）：自查 / 客户报障时一眼看出问题在哪一层，
+        #    不必装 adb、也不依赖会自动消失的状态栏提示。
+        self.logview = QPlainTextEdit()
+        self.logview.setReadOnly(True)
+        self.logview.setMaximumBlockCount(400)        # 只保留最近 400 行
+        self.logview.setFixedHeight(150)
+        self.logview.setStyleSheet(
+            "background:#0d0d0d; color:#a8b0b8; border:0; border-top:1px solid #333;"
+            "font-family:Consolas,\"Courier New\",monospace; font-size:12px;")
+
+        _central = QWidget()
+        _vbox = QVBoxLayout(_central)
+        _vbox.setContentsMargins(0, 0, 0, 0)
+        _vbox.setSpacing(0)
+        _vbox.addWidget(scroll, 1)
+        _vbox.addWidget(self.logview)
+        self.setCentralWidget(_central)
 
         # 中央提示：尚无画面时占满窗口中央，大字告知「同一局域网 + 要填入 VR 端 App 的 IP:端口」
         self._port = port
@@ -827,6 +844,10 @@ class MainWindow(QMainWindow):
         self.worker.meta_ready.connect(self.on_meta)
         self.worker.stats_ready.connect(self.on_stats)
         self.worker.log_line.connect(lambda s: self.statusBar().showMessage(s, 6000))
+        # ★ 同一条日志也写进窗口底部的常驻日志窗（带时间戳）
+        self.worker.log_line.connect(self._append_log)
+        self._append_log(f"VRCReceiver v{APP_VERSION} 启动 · UDP 视频口 {port} · "
+                         f"MJPEG {mjpeg_port if mjpeg_port else '关闭'}")
         # ★ 端口被占会自动顺延（StreamWorker.port 在绑定成功后才更新）——
         #   顺带刷新中央提示里的 IP:端口，避免用户照抄请求端口（客户机实测报障）。
         self.worker.log_line.connect(lambda _s: self._update_hint())
@@ -875,26 +896,51 @@ class MainWindow(QMainWindow):
 
     # ---------------- 槽 ----------------
     def _on_beacon_event(self, kind, detail):
-        """自动搜索应答服务状态 → 状态栏。
+        """自动搜索应答服务状态 → **常驻**显示（状态栏 + 中央提示）。
 
-        ★ 这段是为「App 点自动搜索搜不到」准备的观测点：一眼能看出
-          · 就绪      —— 应答服务正常在 5001 上听
-          · 不可用    —— 5001 被别的程序占用（App 永远搜不到）
-          · 已应答查询 —— 收到过 App 的广播（说明网络/防火墙是通的）
+        ★ 之前只发状态栏临时消息（6 秒消失），用户根本看不到 ⇒ 改为常驻。
+          一眼能看出：
+            · 自动搜索：就绪 · 已应答 N 次   —— 一切正常，且说明收到过 App 的广播
+            · 自动搜索：不可用（5001 被占用）—— App 必然搜不到，原因就在本机
+            · 自动搜索：启动中                —— 还没绑上
         beacon_loop 跑在普通线程里，这里通过 Qt 信号回主线程（跨线程安全）。
         """
         try:
             if kind == "listening":
+                self._beacon = {"kind": "ready", "ip": detail, "count": 0, "err": ""}
                 msg = f"自动搜索：就绪（本机 {detail}）"
             elif kind == "bind_fail":
+                self._beacon = {"kind": "fail", "ip": "", "count": 0, "err": detail}
                 msg = (f"自动搜索：不可用 —— 端口 {receiver.BEACON_PORT} 被占用，"
-                       f"App 将搜不到本机（{detail}）")
-            else:
-                msg = f"自动搜索：已应答查询（来自 {detail}）"
+                       f"App 将搜不到本机")
+            else:  # answered
+                st = getattr(self, "_beacon", None) or {"kind": "ready", "ip": "", "count": 0, "err": ""}
+                st["count"] = st.get("count", 0) + 1
+                self._beacon = st
+                msg = f"自动搜索：已应答查询（来自 {detail}），累计 {st['count']} 次"
             self.worker.log_line.emit(msg)
             print("[自动搜索]", msg)
+            self._update_hint()          # ★ 常驻刷新
         except Exception:
             pass
+
+    def _append_log(self, msg):
+        """写入窗口内常驻日志（带时间戳，供自查与客户报障）"""
+        try:
+            self.logview.appendPlainText(f"{time.strftime('%H:%M:%S')}  {msg}")
+        except Exception:
+            pass
+
+    def _beacon_line(self):
+        """中央提示里那行常驻的自动搜索状态（纯文本）"""
+        st = getattr(self, "_beacon", None) or {"kind": "starting", "count": 0}
+        k = st.get("kind")
+        if k == "ready":
+            n = st.get("count", 0)
+            return f"自动搜索 OK · 已应答 {n} 次" if n else "自动搜索 OK · 尚未收到查询"
+        if k == "fail":
+            return f"自动搜索不可用（端口 {receiver.BEACON_PORT} 被占用）"
+        return "自动搜索 启动中…"
 
     def _update_hint(self):
         """中央提示：同一局域网 + 要填入 VR 端 App 的 IP:端口（只是提醒，不多写废话）"""
@@ -913,7 +959,10 @@ class MainWindow(QMainWindow):
             f"{ip}:{port}</div>"
             # ★ 版本号（用户据此判断要不要更新；数字无需翻译）
             f"<div style='height:14px;'></div>"
-            f"<div style='color:#888888; font-size:14px;'>v{APP_VERSION}</div>")
+            f"<div style='color:#888888; font-size:14px;'>v{APP_VERSION}</div>"
+            # ★ 常驻的自动搜索状态：诊断「App 搜不到」时一眼就能看出问题在哪一层
+            f"<div style='height:10px;'></div>"
+            f"<div style='color:#9aa0a6; font-size:14px;'>{self._beacon_line()}</div>")
 
     def _create_panel(self, sid):
         url = f"http://127.0.0.1:{self.mjpeg_port}/cam/{sid}" if self.mjpeg_port else None
