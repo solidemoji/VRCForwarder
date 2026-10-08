@@ -63,7 +63,7 @@
 |---|---|---|
 | **Pico 4 Ultra** | PICO OS 5 / Android 14 | ✅ 已实测通过 |
 | **Quest 3 / 3S** | Horizon OS / Android 14 | ✅ 已实测通过（本机验证机型为 Quest 3S） |
-| **Pico 4** | **Android 10 / PICO OS 5.13.7** | ✅ **已实测通过**（标准 UVC 相机：OV9281，MJPEG 640×480@120，实测 100–121 fps） |
+| **Pico 4** | **Android 10 / PICO OS 5.13.7** | ✅ **已实测通过**（标准免驱 OV9281：MJPEG 640×480@120，100–121 fps；免驱模组 GC0308 与自家 XIAO **也可用** —— 见下） |
 | **Pico 4 Pro** | PICO OS 4 / Android 10 | ❓ 未测试 |
 | **Quest 2** | Horizon OS | ❓ 未测试 |
 | 其它安卓手机 / 平板 | Android 9 及以上 | ❓ 未测试 |
@@ -73,11 +73,22 @@
 - 标准免驱 UVC 相机（OV9281）**枚举完整** —— 视频控制接口 + 视频流接口（多档 alternate setting + ISO 端点）齐全；
 - 能力表读取、自动选档、出流全部正常，**MJPEG 640×480@120，实测 100–121 fps**，与 Quest 3S 基准一致。
 
-> 此前"能识别设备但相机列表为空"的反馈，经实机复现确认**只出现在我们自家 XIAO 固件（USB 复合描述符）上**：
-> Android 10 的 USB 枚举不会暴露该复合描述符里的 VideoStreaming 接口（同一份固件在 Windows 与 Android 14 上枚举完全正常）。
-> 随后做了穷举验证（有/无 CDC × BULK/ISO × alt 布局，**5 个固件版本全部失败**），
-> 系统日志显示 AOSP 解析器在该描述符上抛异常并中止解析 ⇒ **App 侧无法解决**。
-> 用自家 XIAO / OpenIris 硬件的 Pico 4 用户请改用**标准免驱 UVC 相机**或固件的 **WiFi 推流模式**。
+> ⚠️ **Android 10 的枚举层在部分复合描述符上会解析失败**：AOSP 的 `UsbDescriptorParser` 会抛异常并**中止解析**
+> （自家 XIAO 的描述符上抛 `NegativeArraySizeException`，GC0308 免驱模组上抛 `IllegalArgumentException`），
+> 结果是**系统只给出 0 个接口** —— 按常规做法任何 App 都拿不到这台相机。
+> 同一批相机在 Android 14 上枚举完全正常。
+>
+> **✅ 从 v0.0.7 / v0.0.10 起本 App 已绕过该平台缺陷**（应用侧自读原始配置描述符 + 反射 claim 接口，
+> 取流交给原生 UVC 栈）。实测三种相机在 Pico 4 上均可用：
+>
+> | 相机 | 结果 |
+> |---|---|
+> | 免驱 OV9281（`0C45:636D`） | ✅ MJPEG 640×480@120，100–121 fps |
+> | GC0308 免驱模组（`0581:0B20`，复合相机） | ✅ 系统给 0 个接口，App 侧绕过，**25 fps 稳定出流** |
+> | 自家 XIAO / OpenIris 硬件（CDC + UVC） | ✅ 原始描述符回退 + BULK 取流 |
+>
+> 这类相机还有个共同特点：**CDC 串口先枚举、UVC 接口等重新枚举后才出现**，
+> 插上后可能先看到"暂无视频接口"，几秒后自动恢复正常（v0.0.12 起界面不再误标"不可用"）。
 
 Android 10 对 UVC 类设备另有一道门禁（AOSP `UsbUserSettingsManager`）：`targetSdk >= 28` 需先取得
 `CAMERA` 运行时权限。本 App 已把 `targetSdk` 压到 **27** 并同时申请该权限，实测无阻碍。

@@ -69,7 +69,7 @@ unverified — please download it, try it, and report back.**
 |---|---|---|
 | **Pico 4 Ultra** | PICO OS 5 / Android 14 | ✅ Verified working |
 | **Quest 3 / 3S** | Horizon OS / Android 14 | ✅ Verified working (validated on Quest 3S) |
-| **Pico 4** | **Android 10 / PICO OS 5.13.7** | ✅ **Verified working** (standard UVC camera: OV9281, MJPEG 640×480@120, measured **100–121 fps**) |
+| **Pico 4** | **Android 10 / PICO OS 5.13.7** | ✅ **Verified working** (standard OV9281: MJPEG 640×480@120, 100–121 fps; the GC0308 driver-free module and our own XIAO **also work** — see below) |
 | **Pico 4 Pro** | PICO OS 4 / Android 10 | ❓ Untested |
 | **Quest 2** | Horizon OS | ❓ Untested |
 | Other Android phones / tablets | Android 9 or newer | ❓ Untested |
@@ -87,16 +87,27 @@ PICO OS 5.13.7**) specifically to test this:
 > expose the VideoStreaming interface of such a composite descriptor, **while the very same firmware
 > enumerates correctly on Windows and on Android 14**.
 >
-> We then ran an exhaustive sweep — **with/without CDC × BULK/ISO transfer × alt layout, 5 firmware
-> builds in total, all failing**. System logs show AOSP's `UsbDescriptorParser` throwing
-> `NegativeArraySizeException` on this descriptor and aborting the parse (it first mis-reads the CDC
-> `0x24` class descriptors as audio, desyncing the stream). Final conclusion: **Android 10's USB
-> enumeration layer does not expose the video-streaming interface of this firmware, and no app-side
-> change can fix it.**
+> (Background: we also ran an exhaustive firmware sweep on our own XIAO — with/without CDC ×
+> BULK/ISO transfer × alt layout — all failing, which is how we traced it to the platform parser.)
+> ⚠️ **Android 10's enumeration layer fails to parse some composite descriptors**: AOSP's
+> `UsbDescriptorParser` throws and **aborts the parse** (`NegativeArraySizeException` on our XIAO's
+> descriptors, `IllegalArgumentException` on the GC0308 module), so the system exposes **zero
+> interfaces** — no app can reach such a camera the conventional way. The same cameras enumerate
+> fine on Android 14.
 >
-> **Pico 4 users running our own XIAO / OpenIris hardware**: please use a **standard driver-free UVC
-> camera** (verified working) or the firmware's built-in **WiFi streaming mode**. Standard UVC cameras
-> are unaffected by this issue.
+> **✅ Since v0.0.7 / v0.0.10 the app works around this platform defect** (it reads the raw
+> configuration descriptor itself and claims the interface via reflection, then hands streaming to
+> the native UVC stack). All three camera types were verified working on a Pico 4:
+>
+> | Camera | Result |
+> |---|---|
+> | Driver-free OV9281 (`0C45:636D`) | ✅ MJPEG 640×480@120, 100–121 fps |
+> | GC0308 module (`0581:0B20`, composite) | ✅ system reports 0 interfaces; app-side bypass, **stable 25 fps** |
+> | Our own XIAO / OpenIris hardware (CDC + UVC) | ✅ raw-descriptor fallback + BULK streaming |
+>
+> These cameras share one trait: the **CDC serial part enumerates first and the UVC interface only
+> appears after a re-enumeration**, so right after plugging in you may briefly see "no video
+> interface"; it recovers by itself within seconds (since v0.0.12 the UI no longer mislabels it).
 
 Android 10 also adds a gate for UVC-class devices (AOSP `UsbUserSettingsManager`): with
 `targetSdk >= 28` the app must already hold the `CAMERA` runtime permission. This app lowers
