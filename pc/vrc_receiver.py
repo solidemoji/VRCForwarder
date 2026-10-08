@@ -56,7 +56,7 @@ MAX_STREAMS = receiver.MAX_STREAMS
 
 # ★★ 版本号单一口径：界面上会显示（标题栏 / 状态栏常驻 / 中央提示），
 #    打包脚本 read_version 会从这里读出来生成安装包版本 —— 不要在多处手改。
-APP_VERSION = "0.0.6"
+APP_VERSION = "0.0.7"
 
 
 def _candidate_ports(want, span=10):

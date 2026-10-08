@@ -40,7 +40,11 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; 无需管理员权限：默认装到用户目录，避免 UAC（也可用 admin 模式装到 Program Files）
-PrivilegesRequired=lowest
+; ★★ 默认要求管理员：防火墙放行规则（UDP 5000-5020，含「自动搜索」口 5001）**只有管理员模式才会执行**。
+;    做成默认非管理员的话，客户装上后规则一条都没有 ⇒ App 点自动搜索永远搜不到
+;    （本机回环测试不受防火墙管，开发时测不出来，只有客户机暴露）。
+;    仍保留 overrides=dialog：坚持不想提权的用户可以自己选"仅为我安装"，但那样得手动放行防火墙。
+PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 ; 向导界面
 WizardStyle=modern
@@ -74,7 +78,14 @@ Name: "firewall"; Description: "允许局域网内其它设备访问拉流地址
 Source: "{#SrcDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [UninstallRun]
-; 卸载时移除上面加的规则（名字对不上就静默失败，无副作用）
+; 卸载时移除下面加的规则（名字对不上就静默失败，无副作用）
+Filename: "{sys}\netsh.exe"; \
+    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} TCP 8080"""; \
+    Flags: runhidden
+Filename: "{sys}\netsh.exe"; \
+    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} UDP 5000-5020"""; \
+    Flags: runhidden
+; 清理旧版（≤0.0.6）遗留的窄规则
 Filename: "{sys}\netsh.exe"; \
     Parameters: "advfirewall firewall delete rule name=""{#MyAppName} MJPEG TCP 8080"""; \
     Flags: runhidden
@@ -100,13 +111,23 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
 
 [Run]
 ; 防火墙放行（仅管理员安装模式 + 勾选该任务时执行）
+; ★★ 必须放行整个 UDP 5000-5020 区间，而不是只放 5000：
+;    · 5001 = 「自动搜索」广播应答口 —— 漏了它，App 点自动搜索永远搜不到
+;      （本机回环测试不受防火墙影响，所以开发时测不出来，只有客户机才暴露）；
+;    · 5002+ = 视频口被占用时自动顺延用的（见 vrc_receiver._candidate_ports）。
 ; 用**端口级**规则：Windows 首次运行弹窗生成的是"按程序路径"的规则，
-; 程序一换目录（重新解压/升级/换安装位置）就失效
+; 程序一换目录（重新解压/升级/换安装位置）就失效。
 Filename: "{sys}\netsh.exe"; \
-    Parameters: "advfirewall firewall add rule name=""{#MyAppName} MJPEG TCP 8080"" dir=in action=allow protocol=TCP localport=8080 profile=any"; \
+    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} MJPEG TCP 8080"""; \
     Flags: runhidden; Tasks: firewall
 Filename: "{sys}\netsh.exe"; \
-    Parameters: "advfirewall firewall add rule name=""{#MyAppName} UDP 5000"" dir=in action=allow protocol=UDP localport=5000 profile=any"; \
+    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} UDP 5000"""; \
+    Flags: runhidden; Tasks: firewall
+Filename: "{sys}\netsh.exe"; \
+    Parameters: "advfirewall firewall add rule name=""{#MyAppName} TCP 8080"" dir=in action=allow protocol=TCP localport=8080 profile=any"; \
+    Flags: runhidden; Tasks: firewall
+Filename: "{sys}\netsh.exe"; \
+    Parameters: "advfirewall firewall add rule name=""{#MyAppName} UDP 5000-5020"" dir=in action=allow protocol=UDP localport=5000-5020 profile=any"; \
     Flags: runhidden; Tasks: firewall
 ; 安装完成后可选“立即运行”
 Filename: "{app}\{#MyAppExeName}"; \
