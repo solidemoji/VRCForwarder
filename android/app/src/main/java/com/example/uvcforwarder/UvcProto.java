@@ -58,6 +58,15 @@ public final class UvcProto {
     public static final int MAX_STREAMS = 6;
     public static final int NET_PORT_DEFAULT = 5000;
     public static final int NET_BEACON_PORT = 5001;
+    /**
+     * ★★ 应答口的候选组（与 PC 端 vrc_protocol.BEACON_PORT_CANDIDATES 保持一致）。
+     * 5001 常被别的软件占用（实测客户机上被 NI 的 lktsrv.exe / NI Time Synchronization 占着），
+     * 接收端绑不上会顺延到 5011..5019 —— 所以自动搜索要对**整组**逐一发 DISCOVER，
+     * 谁应答就用谁。只盯着 5001 的话，客户机上永远搜不到。
+     */
+    public static final int[] NET_BEACON_PORT_CANDIDATES = {
+            5001, 5011, 5012, 5013, 5014, 5015, 5016, 5017, 5018, 5019
+    };
     public static final String NET_DISCOVER_MSG = "UVC-FORWARDER-DISCOVER";
     public static final String NET_REPLY_PREFIX = "UVC-RECEIVER ";
 

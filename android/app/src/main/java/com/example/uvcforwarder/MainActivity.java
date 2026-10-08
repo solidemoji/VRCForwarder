@@ -1076,27 +1076,53 @@ public class MainActivity extends AppCompatActivity {
                     sock.setBroadcast(true);
                     sock.setSoTimeout(2500);
                     byte[] msg = UvcProto.NET_DISCOVER_MSG.getBytes("UTF-8");
-                    // 双路广播：有限广播 + 子网定向广播（部分路由器/AP 隔离下有限广播回程不稳）
-                    sock.send(new DatagramPacket(msg, msg.length,
-                            InetAddress.getByName("255.255.255.255"), UvcProto.NET_BEACON_PORT));
+                    // ★★ 双路广播 × 整组候选端口：
+                    //   · 有限广播 + 子网定向广播（部分路由器/AP 隔离下有限广播回程不稳）
+                    //   · 候选端口组：5001 可能被接收端以外的软件占用，接收端会顺延到
+                    //     5011..5019，所以整组都要发（见 UvcProto 里的说明）。
                     String subnetBc = subnetBroadcast();
-                    if (subnetBc != null) {
+                    int sentPorts = 0;
+                    for (int bp : UvcProto.NET_BEACON_PORT_CANDIDATES) {
                         try {
                             sock.send(new DatagramPacket(msg, msg.length,
-                                    InetAddress.getByName(subnetBc), UvcProto.NET_BEACON_PORT));
+                                    InetAddress.getByName("255.255.255.255"), bp));
+                            sentPorts++;
                         } catch (Exception ignored) {}
+                        if (subnetBc != null) {
+                            try {
+                                sock.send(new DatagramPacket(msg, msg.length,
+                                        InetAddress.getByName(subnetBc), bp));
+                                sentPorts++;
+                            } catch (Exception ignored) {}
+                        }
                     }
                     // ★ 诊断：把"发了什么、发去哪"记下来（配合下面的收包日志，
                     //   一次点击就能分清是广播没到接收端 / 回包没回来 / 回包格式不对）
-                    Log.i(TAG, "自动搜索：已发送 " + UvcProto.NET_DISCOVER_MSG
-                            + " → 255.255.255.255:" + UvcProto.NET_BEACON_PORT
-                            + " 与子网广播 " + (subnetBc == null ? "(无)" : subnetBc + ":"
-                            + UvcProto.NET_BEACON_PORT) + "，等待应答 2.5s");
+                    Log.i(TAG, "自动搜索：已向 " + sentPorts + " 个目标发送 "
+                            + UvcProto.NET_DISCOVER_MSG + "（候选端口 "
+                            + java.util.Arrays.toString(UvcProto.NET_BEACON_PORT_CANDIDATES)
+                            + "，广播地址 255.255.255.255"
+                            + (subnetBc == null ? "" : " + " + subnetBc)
+                            + "），等待应答 2.5s");
                     long deadline = System.currentTimeMillis() + 2500;
                     byte[] buf = new byte[256];
                     while (System.currentTimeMillis() < deadline) {
                         DatagramPacket pkt = new DatagramPacket(buf, buf.length);
-                        try { sock.receive(pkt); } catch (java.net.SocketTimeoutException e) { continue; }
+                        try {
+                            sock.receive(pkt);
+                        } catch (java.net.SocketTimeoutException e) {
+                            continue;
+                        } catch (java.net.PortUnreachableException e) {
+                            // ★★ 向"没有监听者的候选端口"发过 UDP 后，系统可能回 ICMP 不可达，
+                            //    导致本 socket 后续 receive 抛这个异常。整组候选口里必然
+                            //    有些是没人听的 ⇒ 必须吞掉继续等，否则明明接收端已应答
+                            //    也会被判成"搜不到"。（本机 Windows 测试时就踩到了）
+                            continue;
+                        } catch (java.io.IOException e) {
+                            // 其它瞬时 IO 问题同样不应中断搜索；小睡一下避免热循环
+                            try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+                            continue;
+                        }
                         String reply = new String(pkt.getData(), 0, pkt.getLength(), "UTF-8");
                         // ★★ 诊断关键行：收到的**每一个**包都记下来，含来源地址与原文。
                         //    "搜不到"时靠它分清三种情况：

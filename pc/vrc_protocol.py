@@ -27,6 +27,11 @@ MAGIC = b"UV"
 HEADER_LEN = 11          # magic2 + stream_id1 + seq4 + fidx2 + fcnt2
 PAYLOAD_MAX = 1200
 BEACON_PORT = 5001
+# ★★ 应答口的**候选组**：5001 常被别的软件占用（实测客户机上被 NI 的
+#    lktsrv.exe / lkTimeSync「NI Time Synchronization」占着），绑不上就往下顺延。
+#    App 侧会对同一组端口逐一发 DISCOVER，谁应答就用谁 —— 这样谁占 5001 都不影响。
+#    注意：5011-5019 与视频口候选（5000/5002-5010）互不重叠。
+BEACON_PORT_CANDIDATES = [5001] + list(range(5011, 5020))
 DISCOVER_MSG = b"UVC-FORWARDER-DISCOVER"
 REPLY_PREFIX = b"UVC-RECEIVER "
 
@@ -152,14 +157,23 @@ def beacon_loop(video_port=None, on_event=None):
                 pass
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    # 不用 SO_REUSEADDR(Windows 双 bind 劫持坑)，端口被占直接报错
+    # 不用 SO_REUSEADDR(Windows 双 bind 劫持坑)，端口被占直接换下一个
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    try:
-        s.bind(("0.0.0.0", BEACON_PORT))
-    except OSError as e:
-        # ★ 别静默死掉：5001 被占时 App 就永远搜不到，必须让用户看见
-        emit("bind_fail", str(e))
-        print(f"[自动搜索] ✗ 端口 {BEACON_PORT} 绑定失败（自动搜索不可用）: {e}")
+    # ★★ 依次尝试候选口：5001 常被别的软件占（实测客户机上被 NI 的 lktsrv.exe 占着），
+    #    绑不上就顺延到 5011..5019。App 会对同一组端口逐一发 DISCOVER，因此照样能搜到。
+    bound_port = None
+    last_err = None
+    for cand in BEACON_PORT_CANDIDATES:
+        try:
+            s.bind(("0.0.0.0", cand))
+            bound_port = cand
+            break
+        except OSError as e:
+            last_err = e
+    if bound_port is None:
+        # 整组都被占（极罕见）—— 别静默死掉，必须让用户看见
+        emit("bind_fail", str(last_err))
+        print(f"[自动搜索] ✗ 候选端口全部被占用（自动搜索不可用）: {last_err}")
         return
     my_ip = local_ip()
     subnet_bc = "255.255.255.255"
@@ -168,8 +182,10 @@ def beacon_loop(video_port=None, on_event=None):
         subnet_bc = ".".join(str(parts[i] if i < 3 else 255) for i in range(4))
     except Exception:
         pass
-    emit("listening", my_ip)
-    print(f"[自动搜索] 应答服务已启动 (本机 IP: {my_ip}, 子网广播 {subnet_bc})")
+    emit("listening", f"{my_ip}" + ("" if bound_port == BEACON_PORT
+                                    else f"，应答口 {bound_port}（{BEACON_PORT} 被占）"))
+    print(f"[自动搜索] 应答服务已启动 (端口 {bound_port}, 本机 IP: {my_ip}, "
+          f"子网广播 {subnet_bc})")
     while True:
         try:
             data, addr = s.recvfrom(512)

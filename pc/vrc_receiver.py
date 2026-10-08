@@ -56,15 +56,16 @@ MAX_STREAMS = receiver.MAX_STREAMS
 
 # ★★ 版本号单一口径：界面上会显示（标题栏 / 状态栏常驻 / 中央提示），
 #    打包脚本 read_version 会从这里读出来生成安装包版本 —— 不要在多处手改。
-APP_VERSION = "0.0.10"
+APP_VERSION = "0.0.11"
 
 
 def _candidate_ports(want, span=10):
-    """生成候选 UDP 视频端口：先要的那个，再顺延（跳过自动搜索的 beacon 端口）。"""
+    """生成候选 UDP 视频端口：先要的那个，再顺延（跳过所有应答口候选）。"""
+    skip = set(receiver.BEACON_PORT_CANDIDATES)
     out = [want]
     p = want + 1
     while len(out) < span:
-        if p != receiver.BEACON_PORT:
+        if p not in skip:
             out.append(p)
         p += 1
     return out

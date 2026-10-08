@@ -130,8 +130,17 @@ android {
         //          · 「自动搜索：收到包 ← …」 = 回包回来了（含来源+原文）
         //          · 一条"收到包"都没有       = 广播没到达接收端（防火墙/AP 隔离/跨网段）
         //        接收端同时会显示「自动搜索：就绪 / 不可用（5001 被占）/ 已应答查询」。
-        versionCode 17
-        versionName "0.0.15"
+        //      0.0.16 (code 18)：自动搜索对**整组候选应答口**逐一发 DISCOVER
+        //        客户机真因（用户截图确认）：接收端提示「端口 5001 已被占用」——
+        //        占用者是 NI 的 lktsrv.exe（National Instruments Time Synchronization，
+        //        正规软件、常年常驻），导致接收端应答服务根本绑不上 5001 ⇒ 永远搜不到。
+        //        不能要求客户去关 NI 的服务 ⇒ 改成双方都不死盯 5001：
+        //          · 接收端：5001 被占则顺延到 5011..5019（vrc_protocol.BEACON_PORT_CANDIDATES）；
+        //          · App：对同一组端口 × 两种广播地址逐一发 DISCOVER，谁应答就用谁。
+        //        本机实测：占住 5001 后接收端绑 5011，扫描式 DISCOVER 照样收到应答。
+        //   并发构建会互相覆盖产物（踩过）⇒ 必须串行；且发布前跑一次打包产物实测。
+        versionCode 19
+        versionName "0.0.17"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
