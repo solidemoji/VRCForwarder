@@ -56,7 +56,7 @@ MAX_STREAMS = receiver.MAX_STREAMS
 
 # ★★ 版本号单一口径：界面上会显示（标题栏 / 状态栏常驻 / 中央提示），
 #    打包脚本 read_version 会从这里读出来生成安装包版本 —— 不要在多处手改。
-APP_VERSION = "0.0.9"
+APP_VERSION = "0.0.10"
 
 
 def _candidate_ports(want, span=10):
@@ -895,26 +895,63 @@ class MainWindow(QMainWindow):
                                        ip=receiver.local_ip(), mj=self.mjpeg_port))
 
     # ---------------- 槽 ----------------
-    def _on_beacon_event(self, kind, detail):
-        """自动搜索应答服务状态 → **常驻**显示（状态栏 + 中央提示）。
+    @staticmethod
+    def _who_holds_port(port=receiver.BEACON_PORT):
+        """查谁占着这个 UDP 端口 → 返回 "进程名 (PID 1234)"，查不到返回空串。
 
-        ★ 之前只发状态栏临时消息（6 秒消失），用户根本看不到 ⇒ 改为常驻。
-          一眼能看出：
-            · 自动搜索：就绪 · 已应答 N 次   —— 一切正常，且说明收到过 App 的广播
-            · 自动搜索：不可用（5001 被占用）—— App 必然搜不到，原因就在本机
+        ★ 客户机上 5001 被占时，App 永远搜不到。光说"被占用"用户没法处理，
+          这里直接点名是谁占的（多半是另一个没关掉的接收端实例）。
+        """
+        try:
+            import re
+            import subprocess
+            out = subprocess.run(["netstat", "-ano", "-p", "UDP"],
+                                 capture_output=True, text=True, errors="replace").stdout
+            pid = None
+            for line in out.splitlines():
+                if f":{port}" in line:
+                    m = re.search(r"(\d+)\s*$", line.strip())
+                    if m:
+                        pid = m.group(1)
+                        break
+            if not pid:
+                return ""
+            tl = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
+                                capture_output=True, text=True, errors="replace").stdout
+            for line in tl.splitlines():
+                if line.strip().startswith("PID") or not line.strip():
+                    continue
+                if pid in line:
+                    return f"{line.split()[0]}（PID {pid}）"
+            return f"PID {pid}"
+        except Exception:
+            return ""
+
+    def _on_beacon_event(self, kind, detail):
+        """自动搜索应答服务状态 → **常驻**显示（状态栏 + 中央提示 + 底部日志）。
+
+        ★ 一眼能看出：
+            · 自动搜索：就绪 · 已应答 N 次   —— 正常，且说明收到过 App 的广播
+            · 自动搜索：不可用（5001 被占用）—— App 必然搜不到；直接点名占用者
             · 自动搜索：启动中                —— 还没绑上
         beacon_loop 跑在普通线程里，这里通过 Qt 信号回主线程（跨线程安全）。
         """
         try:
             if kind == "listening":
-                self._beacon = {"kind": "ready", "ip": detail, "count": 0, "err": ""}
+                self._beacon = {"kind": "ready", "ip": detail, "count": 0, "err": "",
+                                "who": ""}
                 msg = f"自动搜索：就绪（本机 {detail}）"
             elif kind == "bind_fail":
-                self._beacon = {"kind": "fail", "ip": "", "count": 0, "err": detail}
-                msg = (f"自动搜索：不可用 —— 端口 {receiver.BEACON_PORT} 被占用，"
-                       f"App 将搜不到本机")
+                who = self._who_holds_port()
+                self._beacon = {"kind": "fail", "ip": "", "count": 0, "err": detail,
+                                "who": who}
+                msg = (f"自动搜索：不可用 —— 端口 {receiver.BEACON_PORT} 已被占用"
+                       + (f"，占用者：{who}" if who else "")
+                       + "。若那是另一个接收端窗口，关掉它再重开本程序即可；"
+                         "否则请查出该程序并关闭/改用其它端口")
             else:  # answered
-                st = getattr(self, "_beacon", None) or {"kind": "ready", "ip": "", "count": 0, "err": ""}
+                st = getattr(self, "_beacon", None) or {"kind": "ready", "ip": "",
+                                                        "count": 0, "err": "", "who": ""}
                 st["count"] = st.get("count", 0) + 1
                 self._beacon = st
                 msg = f"自动搜索：已应答查询（来自 {detail}），累计 {st['count']} 次"
@@ -939,7 +976,9 @@ class MainWindow(QMainWindow):
             n = st.get("count", 0)
             return f"自动搜索 OK · 已应答 {n} 次" if n else "自动搜索 OK · 尚未收到查询"
         if k == "fail":
-            return f"自动搜索不可用（端口 {receiver.BEACON_PORT} 被占用）"
+            who = st.get("who") or ""
+            return (f"自动搜索不可用（端口 {receiver.BEACON_PORT} 已被占用"
+                    + (f"：{who}" if who else "") + "）")
         return "自动搜索 启动中…"
 
     def _update_hint(self):
