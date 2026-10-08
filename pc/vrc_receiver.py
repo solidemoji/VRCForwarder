@@ -45,7 +45,7 @@ from PySide6.QtGui import QAction, QColor, QImage, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QPushButton, QScrollArea, QGridLayout, QSystemTrayIcon, QMenu,
-    QStyle, QFrame, QLineEdit,
+    QStyle, QFrame, QLineEdit, QMessageBox,
 )
 
 import vrc_protocol as receiver  # 复用: MAGIC/HEADER_LEN/Reassembler/beacon_loop/local_ip 等
@@ -53,6 +53,17 @@ import i18n      # 多语言(跟随系统语言, 支持 zh/en/ja/ko/ru, 其它�
 from i18n import t
 
 MAX_STREAMS = receiver.MAX_STREAMS
+
+
+def _candidate_ports(want, span=10):
+    """生成候选 UDP 视频端口：先要的那个，再顺延（跳过自动搜索的 beacon 端口）。"""
+    out = [want]
+    p = want + 1
+    while len(out) < span:
+        if p != receiver.BEACON_PORT:
+            out.append(p)
+        p += 1
+    return out
 
 
 # =====================================================================
@@ -99,11 +110,25 @@ class StreamWorker(QThread):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # 注意: 不用 SO_REUSEADDR —— Windows 上它允许同端口双 bind，
         # 新实例 bind "成功"但旧实例劫持全部包(极难排查)；端口被占应明确报错
-        try:
-            sock.bind(("0.0.0.0", self.port))
-        except OSError as e:
-            self.log_line.emit(t("port_bind_fail", port=self.port, err=e))
+        # ★★ 但**不能就此放弃**：很多机器上 5000 被系统/其它软件占用（用户实测报
+        #    "端口 5000 绑定失败"），此时完全没有画面。改为自动顺延到下一个空闲端口，
+        #    并通过「自动搜索」应答把**实际端口**告诉 App（App 侧已支持读取）。
+        want = self.port
+        last_err = None
+        bound = False
+        for cand in _candidate_ports(want):
+            try:
+                sock.bind(("0.0.0.0", cand))
+                self.port = cand          # ★ 实际端口（beacon 应答会带走它）
+                bound = True
+                break
+            except OSError as e:
+                last_err = e
+        if not bound:
+            self.log_line.emit(t("port_bind_fail", port=want, err=last_err))
             return
+        if self.port != want:
+            self.log_line.emit(t("port_shifted", want=want, got=self.port))
         self.log_line.emit(t("listening_udp", port=self.port))
 
         while not self._stop:
@@ -293,14 +318,14 @@ class CameraPanel(QFrame):
         # 本地拉流地址（可复制）
         if url:
             url_row = QHBoxLayout()
+            # 显式固定配色(浅底深字+边框)，避免受全局 palette/主题影响看不清
+            qss = ("QLineEdit{font-size:11px; background:#ffffff; color:#111111;"
+                   " border:1px solid #b0b0b0; border-radius:3px; padding:2px 6px;}"
+                   "QLineEdit:focus{border:1px solid #ff7a1a;}")
             self.urlEdit = QLineEdit(url)
             self.urlEdit.setReadOnly(True)
             self.urlEdit.setCursorPosition(0)
-            # 显式固定配色(浅底深字+边框)，避免受全局 palette/主题影响看不清
-            self.urlEdit.setStyleSheet(
-                "QLineEdit{font-size:11px; background:#ffffff; color:#111111;"
-                " border:1px solid #b0b0b0; border-radius:3px; padding:2px 6px;}"
-                "QLineEdit:focus{border:1px solid #ff7a1a;}")
+            self.urlEdit.setStyleSheet(qss)
             url_row.addWidget(self.urlEdit, 1)
             btnCopy = QPushButton(t("btn_copy"))
             btnCopy.setFixedWidth(52)
@@ -308,6 +333,29 @@ class CameraPanel(QFrame):
             btnCopy.clicked.connect(lambda: self._copy_url())
             url_row.addWidget(btnCopy)
             lay.addLayout(url_row)
+
+            # ★ 再给一行「局域网地址」：上面那行是 127.0.0.1，**只在接收端这台机器上有效**。
+            #   客户把 Baballonia / 浏览器放在另一台设备（或另一台 PC）时，
+            #   必须用局域网 IP —— 实测这是「接收端能看画面、外部却拉不到」的头号原因。
+            self.lanEdit = None
+            try:
+                lan = receiver.local_ip()
+            except Exception:
+                lan = ""
+            if lan and not lan.startswith("127.") and "127.0.0.1" in url:
+                self.lanEdit = QLineEdit(url.replace("127.0.0.1", lan))
+                self.lanEdit.setReadOnly(True)
+                self.lanEdit.setCursorPosition(0)
+                self.lanEdit.setStyleSheet(qss)
+                lan_row = QHBoxLayout()
+                lan_row.addWidget(self.lanEdit, 1)
+                btnCopy2 = QPushButton(t("btn_copy"))
+                btnCopy2.setFixedWidth(52)
+                btnCopy2.setStyleSheet("color:#111111; background:#e8e8e8;")
+                btnCopy2.clicked.connect(
+                    lambda: QApplication.clipboard().setText(self.lanEdit.text()))
+                lan_row.addWidget(btnCopy2)
+                lay.addLayout(lan_row)
 
     def _copy_url(self):
         QApplication.clipboard().setText(self.urlEdit.text())
@@ -323,9 +371,14 @@ class CameraPanel(QFrame):
             return
         try:
             import urllib.parse
-            base = self.urlEdit.text().rsplit("/cam/", 1)[0]
-            self.urlEdit.setText(base + "/cam/" + urllib.parse.quote(key, safe=""))
+            suffix = "/cam/" + urllib.parse.quote(key, safe="")
+            self.urlEdit.setText(self.urlEdit.text().rsplit("/cam/", 1)[0] + suffix)
             self.urlEdit.setCursorPosition(0)
+            # 局域网那一行也要跟着换 key（否则插拔后会指向旧 sid）
+            lan = getattr(self, "lanEdit", None)
+            if lan is not None:
+                lan.setText(lan.text().rsplit("/cam/", 1)[0] + suffix)
+                lan.setCursorPosition(0)
         except Exception:
             pass
 
@@ -551,10 +604,18 @@ class MjpegBridge:
             for s in sids:
                 k = self.bridge.worker.meta_key.get(s)
                 addr = f"/cam/{_up.quote(k, safe='')}" if k else f"/cam/{s}"
+                # ★ 绝不能写 server_address[0]：桥绑的是 0.0.0.0，
+                #   那样页面会显示 http://0.0.0.0:8080/... —— 客户照着复制必然打不开。
+                #   要显示**本机对外可达的局域网 IP**。
+                try:
+                    host = receiver.local_ip()
+                except Exception:
+                    host = "127.0.0.1"
                 rows += (f"<h3>{s}: {self.bridge.worker.meta_name.get(s, '')}</h3>"
                          f"<img src='/cam/{s}' width='480'>"
-                         f"<p>推流地址(稳定): <code>http://"
-                         f"{self.server.server_address[0]}:{self.bridge.port}{addr}</code></p>")
+                         f"<p>本机拉流: <code>http://127.0.0.1:{self.bridge.port}{addr}</code><br>"
+                         f"局域网拉流（Baballonia/浏览器不在本机时用这个）: "
+                         f"<code>http://{host}:{self.bridge.port}{addr}</code></p>")
             if not rows:
                 rows = f"<p>{t('no_stream')}</p>"
             html = ("<html><head><title>VRCReceiver MJPEG</title></head>"
@@ -656,20 +717,39 @@ class MjpegBridge:
                 except Exception:
                     pass
 
+    # ★ allow_reuse_address 必须关掉：Windows 的 SO_REUSEADDR 会让**第二个实例也绑定成功**
+    #   （实测过：两个进程同时 LISTENING 同一端口），连接落到哪个实例不确定 ——
+    #   客户表现为「接收端窗口有画面，但本机 127.0.0.1:8080 拉不到」。
+    #   关掉它，端口冲突才会**可见**，并触发下面的自动顺延。
+    class _Server(ThreadingHTTPServer):
+        allow_reuse_address = False
+
     def start(self):
+        """绑定 MJPEG 端口；被占用时自动顺延到下一个空闲端口。
+
+        成功时 self.port 会被更新为**真实绑定到的端口**（可能不是传入的）。
+        """
         class Handler(self._Handler):
             pass
         Handler.bridge = self
-        try:
-            self.server = ThreadingHTTPServer(("0.0.0.0", self.port), Handler)
-        except OSError as e:
-            print(t("port_bind_fail", port=self.port, err=e))
-            return False
-        self.thread = threading.Thread(target=self.server.serve_forever,
-                                       daemon=True, name="mjpeg-bridge")
-        self.thread.start()
-        print(t("bridge_ready", port=self.port))
-        return True
+        self.port_shifted = False
+        self.bind_error = ""
+        want = self.port
+        for cand in range(want, want + 11):
+            try:
+                self.server = self._Server(("0.0.0.0", cand), Handler)
+            except OSError as e:
+                self.bind_error = str(e)
+                continue
+            self.port = cand
+            self.port_shifted = (cand != want)
+            self.thread = threading.Thread(target=self.server.serve_forever,
+                                           daemon=True, name="mjpeg-bridge")
+            self.thread.start()
+            print(t("bridge_ready", port=cand))
+            return True
+        print(t("port_bind_fail", port=want, err=self.bind_error))
+        return False
 
     def stop(self):
         if self.server is not None:
@@ -750,17 +830,34 @@ class MainWindow(QMainWindow):
 
         # beacon 应答（自动搜索）守护线程
         import threading
-        threading.Thread(target=receiver.beacon_loop, daemon=True).start()
+        # ★ 把**实际**视频端口传进去（可调用对象：绑定是异步的，端口绑定成功后才确定）。
+        #   接收端在 5000 被占用时会自动顺延，应答里带上真实端口，App 才能跟着改。
+        threading.Thread(target=receiver.beacon_loop,
+                         kwargs={"video_port": lambda: self.worker.port},
+                         daemon=True).start()
 
         # MJPEG over HTTP 桥（供桌面软件以 IP 摄像头方式拉流）
         if mjpeg_port and mjpeg_port > 0:
             self.bridge = MjpegBridge(self.worker, port=mjpeg_port,
                                       max_fps=mjpeg_fps,
                                       max_width=mjpeg_max_width)
-            self.bridge.start()
+            if self.bridge.start():
+                # ★ 面板地址必须用**实际绑定成功**的端口（可能已自动顺延）
+                self.mjpeg_port = self.bridge.port
+                if self.bridge.port_shifted:
+                    QMessageBox.information(
+                        self, t("win_title"),
+                        t("bridge_port_shifted", want=mjpeg_port,
+                          got=self.bridge.port))
+            else:
+                # ★ 原先这里是**静默失败**：只 print（打包版 console=False，输出被丢弃），
+                #   调用处不看返回值，面板却照旧显示地址 —— 客户表现为
+                #   「接收端窗口有画面，但本机 127.0.0.1:8080 打不开」。必须显式报警。
+                QMessageBox.warning(self, t("win_title"),
+                                    t("bridge_port_busy", port=mjpeg_port))
 
         self.statusBar().showMessage(t("status_listen", port=port,
-                                       ip=receiver.local_ip(), mj=mjpeg_port))
+                                       ip=receiver.local_ip(), mj=self.mjpeg_port))
 
     # ---------------- 槽 ----------------
     def _update_hint(self):

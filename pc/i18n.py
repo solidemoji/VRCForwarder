@@ -65,6 +65,15 @@ STRINGS = {
         "ko": "포트 {port} 바인딩 실패(사용 중일 수 있음): {err}",
         "ru": "Не удалось занять порт {port} (уже используется?): {err}",
     },
+    # ★ 5000 被占用时自动顺延到下一个空闲端口（很多机器上 5000 被系统服务占用）。
+    #   顺延后的真实端口会通过「自动搜索」应答告诉 App，用户无需手动设置。
+    "port_shifted": {
+        "zh": "端口 {want} 已被占用，已自动改用 {got}（App 端会自动识别）",
+        "en": "Port {want} is in use — switched to {got} (the app detects this automatically)",
+        "ja": "ポート {want} は使用中のため {got} に変更しました（アプリは自動認識します）",
+        "ko": "포트 {want} 이(가) 사용 중이라 {got} (으)로 변경했습니다 (앱이 자동 인식)",
+        "ru": "Порт {want} занят — переключено на {got} (приложение определит автоматически)",
+    },
     "listening_udp": {
         "zh": "监听 UDP {port}，等待摄像头推流...",
         "en": "Listening on UDP {port}, waiting for camera stream...",
@@ -133,6 +142,21 @@ STRINGS = {
         "ja": "VR と PC が同じ LAN にあることを確認し、この IP とポートを VR 側アプリに入力してください（アプリ内の「自動検索」も使えます）。",
         "ko": "VR과 PC가 같은 LAN에 있는지 확인한 뒤, 이 IP와 포트를 VR 앱에 입력하세요(앱의 '자동 검색'도 사용 가능).",
         "ru": "Убедитесь, что VR и ПК в одной локальной сети, затем введите этот IP и порт в приложении VR (или «Автопоиск»).",
+    },
+    # ---- MJPEG 拉流端口冲突（原先静默失败，客户表现为"面板有地址但打不开"）----
+    "bridge_port_shifted": {
+        "zh": "拉流端口 {want} 已被占用，已自动改用 {got}。\n\n面板上的拉流地址已按新端口显示，可直接使用。\n（若占用者是另一个 VRCReceiver 实例，建议关掉它）",
+        "en": "Pull-stream port {want} was busy, so port {got} is used instead.\n\nThe panel already shows URLs with the new port; they work as-is.\n(If another VRCReceiver instance is holding {want}, consider closing it.)",
+        "ja": "配信ポート {want} は使用中のため、代わりに {got} を使用します。\n\nパネルのアドレスは新しいポートで表示されています。\n（別の VRCReceiver が {want} を使用している場合は終了を推奨）",
+        "ko": "스트림 포트 {want} 이(가) 사용 중이라 {got} 으로 대체했습니다.\n\n패널의 주소는 새 포트로 표시되며 그대로 사용하면 됩니다.\n(다른 VRCReceiver 인스턴스가 {want} 을(를) 점유 중이면 종료를 권장)",
+        "ru": "Порт {want} занят, используется {got}.\n\nАдреса на панели уже показаны с новым портом.\n(Если {want} занят другим экземпляром VRCReceiver, закройте его.)",
+    },
+    "bridge_port_busy": {
+        "zh": "拉流端口 {port} 及后续 10 个端口都被占用，拉流地址将不可用！\n\n常见原因：另一个 VRCReceiver 实例已在运行，或该端口被其它软件占用。\n请关闭占用者后重启本程序。",
+        "en": "Pull-stream port {port} and the next 10 ports are all busy — stream URLs will NOT work!\n\nCommon cause: another VRCReceiver instance is running, or another app holds the port.\nClose it and restart this program.",
+        "ja": "配信ポート {port} 以降の 10 ポートが全て使用中です。配信 URL は使えません。\n\n別の VRCReceiver が動作中か、他のソフトがポートを占有しています。\n終了してから再起動してください。",
+        "ko": "스트림 포트 {port} 및 이후 10개 포트가 모두 사용 중이라 스트림 주소를 쓸 수 없습니다!\n\n다른 VRCReceiver 인스턴스가 실행 중이거나 다른 프로그램이 점유 중입니다.\n종료 후 다시 실행하세요.",
+        "ru": "Порт {port} и следующие 10 портов заняты — адреса потоков работать НЕ будут!\n\nВероятно, уже запущен другой экземпляр VRCReceiver или порт занят другой программой.\nЗакройте его и перезапустите программу.",
     },
 }
 

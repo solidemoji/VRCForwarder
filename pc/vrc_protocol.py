@@ -133,7 +133,15 @@ def local_ip():
         return socket.gethostbyname(socket.gethostname())
 
 
-def beacon_loop():
+def beacon_loop(video_port=None):
+    """自动搜索应答。
+
+    video_port: 实际监听的 UDP 视频端口 —— 可以是 int 或返回 int 的可调用对象
+                （接收端绑定是异步的，端口在绑定成功后才确定）。
+    ★ 为什么要带端口：接收端在 5000 被占用时会**自动顺延**到别的端口，
+      若应答里只有 IP，App 会一直往 5000 发 → 完全没有画面（用户实测报障）。
+      为兼容旧 App：端口等于默认值(5000)时，应答格式保持原样（只有 IP）。
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     # 不用 SO_REUSEADDR(Windows 双 bind 劫持坑)，端口被占直接报错
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -150,7 +158,12 @@ def beacon_loop():
         try:
             data, addr = s.recvfrom(512)
             if data.startswith(DISCOVER_MSG):
-                reply = REPLY_PREFIX + my_ip.encode()
+                try:
+                    vp = int(video_port() if callable(video_port) else video_port)
+                except Exception:
+                    vp = 5000
+                host = my_ip if vp == 5000 else f"{my_ip}:{vp}"
+                reply = REPLY_PREFIX + host.encode()
                 # 三路齐发：单播 + 有限广播 + 子网广播（兼容 AP 客户端隔离）
                 s.sendto(reply, addr)
                 try:
