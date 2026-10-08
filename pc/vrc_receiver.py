@@ -54,6 +54,10 @@ from i18n import t
 
 MAX_STREAMS = receiver.MAX_STREAMS
 
+# ★★ 版本号单一口径：界面上会显示（标题栏 / 状态栏常驻 / 中央提示），
+#    打包脚本 read_version 会从这里读出来生成安装包版本 —— 不要在多处手改。
+APP_VERSION = "0.0.6"
+
 
 def _candidate_ports(want, span=10):
     """生成候选 UDP 视频端口：先要的那个，再顺延（跳过自动搜索的 beacon 端口）。"""
@@ -767,7 +771,7 @@ class MainWindow(QMainWindow):
     def __init__(self, port, display_fps=60, mjpeg_port=8080, mjpeg_fps=60,
                  vcam=None, vcam_fps=60, mjpeg_max_width=0):
         super().__init__()
-        self.setWindowTitle(t("win_title"))
+        self.setWindowTitle(f"{t('win_title')}  v{APP_VERSION}")
         self.resize(1080, 720)
         self.display_fps = display_fps
         self.mjpeg_port = mjpeg_port
@@ -811,6 +815,10 @@ class MainWindow(QMainWindow):
 
         # 状态栏
         self.statusBar().showMessage(t("starting"))
+        # ★ 版本号常驻状态栏右下角（showMessage 是临时消息会被覆盖，这里用 permanent widget）
+        _ver = QLabel(f"v{APP_VERSION}")
+        _ver.setStyleSheet("color:#888888; padding-right:8px;")
+        self.statusBar().addPermanentWidget(_ver)
 
         # 启动接收线程
         self.worker = StreamWorker(port)
@@ -877,7 +885,10 @@ class MainWindow(QMainWindow):
             f"<div style='color:#dddddd; font-size:17px;'>{t('hint_msg')}</div>"
             f"<div style='height:28px;'></div>"
             f"<div style='color:#ff8a1f; font-size:38px; font-weight:bold;'>"
-            f"{ip}:{port}</div>")
+            f"{ip}:{port}</div>"
+            # ★ 版本号（用户据此判断要不要更新；数字无需翻译）
+            f"<div style='height:14px;'></div>"
+            f"<div style='color:#888888; font-size:14px;'>v{APP_VERSION}</div>")
 
     def _create_panel(self, sid):
         url = f"http://127.0.0.1:{self.mjpeg_port}/cam/{sid}" if self.mjpeg_port else None
