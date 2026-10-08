@@ -56,7 +56,7 @@ MAX_STREAMS = receiver.MAX_STREAMS
 
 # ★★ 版本号单一口径：界面上会显示（标题栏 / 状态栏常驻 / 中央提示），
 #    打包脚本 read_version 会从这里读出来生成安装包版本 —— 不要在多处手改。
-APP_VERSION = "0.0.7"
+APP_VERSION = "0.0.8"
 
 
 def _candidate_ports(want, span=10):
@@ -843,8 +843,11 @@ class MainWindow(QMainWindow):
         import threading
         # ★ 把**实际**视频端口传进去（可调用对象：绑定是异步的，端口绑定成功后才确定）。
         #   接收端在 5000 被占用时会自动顺延，应答里带上真实端口，App 才能跟着改。
+        # ★ on_event：把应答服务状态显示到状态栏 —— 「App 搜不到」时能立刻分清是
+        #   本机没起来 / 5001 被占 / 还是压根没收到查询（跨线程走 Qt 信号，安全）。
         threading.Thread(target=receiver.beacon_loop,
-                         kwargs={"video_port": lambda: self.worker.port},
+                         kwargs={"video_port": lambda: self.worker.port,
+                                 "on_event": self._on_beacon_event},
                          daemon=True).start()
 
         # MJPEG over HTTP 桥（供桌面软件以 IP 摄像头方式拉流）
@@ -871,6 +874,28 @@ class MainWindow(QMainWindow):
                                        ip=receiver.local_ip(), mj=self.mjpeg_port))
 
     # ---------------- 槽 ----------------
+    def _on_beacon_event(self, kind, detail):
+        """自动搜索应答服务状态 → 状态栏。
+
+        ★ 这段是为「App 点自动搜索搜不到」准备的观测点：一眼能看出
+          · 就绪      —— 应答服务正常在 5001 上听
+          · 不可用    —— 5001 被别的程序占用（App 永远搜不到）
+          · 已应答查询 —— 收到过 App 的广播（说明网络/防火墙是通的）
+        beacon_loop 跑在普通线程里，这里通过 Qt 信号回主线程（跨线程安全）。
+        """
+        try:
+            if kind == "listening":
+                msg = f"自动搜索：就绪（本机 {detail}）"
+            elif kind == "bind_fail":
+                msg = (f"自动搜索：不可用 —— 端口 {receiver.BEACON_PORT} 被占用，"
+                       f"App 将搜不到本机（{detail}）")
+            else:
+                msg = f"自动搜索：已应答查询（来自 {detail}）"
+            self.worker.log_line.emit(msg)
+            print("[自动搜索]", msg)
+        except Exception:
+            pass
+
     def _update_hint(self):
         """中央提示：同一局域网 + 要填入 VR 端 App 的 IP:端口（只是提醒，不多写废话）"""
         try:

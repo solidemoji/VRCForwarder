@@ -133,19 +133,34 @@ def local_ip():
         return socket.gethostbyname(socket.gethostname())
 
 
-def beacon_loop(video_port=None):
+def beacon_loop(video_port=None, on_event=None):
     """自动搜索应答。
 
     video_port: 实际监听的 UDP 视频端口 —— 可以是 int 或返回 int 的可调用对象
                 （接收端绑定是异步的，端口在绑定成功后才确定）。
+    on_event:   可选回调 (kind, detail) —— 用于把状态显示到界面上，便于诊断"搜不到"：
+                kind = "listening" / "bind_fail" / "answered"
     ★ 为什么要带端口：接收端在 5000 被占用时会**自动顺延**到别的端口，
       若应答里只有 IP，App 会一直往 5000 发 → 完全没有画面（用户实测报障）。
       为兼容旧 App：端口等于默认值(5000)时，应答格式保持原样（只有 IP）。
     """
+    def emit(kind, detail=""):
+        if on_event:
+            try:
+                on_event(kind, detail)
+            except Exception:
+                pass
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     # 不用 SO_REUSEADDR(Windows 双 bind 劫持坑)，端口被占直接报错
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    s.bind(("0.0.0.0", BEACON_PORT))
+    try:
+        s.bind(("0.0.0.0", BEACON_PORT))
+    except OSError as e:
+        # ★ 别静默死掉：5001 被占时 App 就永远搜不到，必须让用户看见
+        emit("bind_fail", str(e))
+        print(f"[自动搜索] ✗ 端口 {BEACON_PORT} 绑定失败（自动搜索不可用）: {e}")
+        return
     my_ip = local_ip()
     subnet_bc = "255.255.255.255"
     try:
@@ -153,6 +168,7 @@ def beacon_loop(video_port=None):
         subnet_bc = ".".join(str(parts[i] if i < 3 else 255) for i in range(4))
     except Exception:
         pass
+    emit("listening", my_ip)
     print(f"[自动搜索] 应答服务已启动 (本机 IP: {my_ip}, 子网广播 {subnet_bc})")
     while True:
         try:
@@ -172,6 +188,7 @@ def beacon_loop(video_port=None):
                 except Exception:
                     pass
                 print(f"[自动搜索] 已应答 {addr[0]} (单播+广播)")
+                emit("answered", addr[0])
         except Exception as e:
             print(f"[自动搜索] 异常: {e}")
 

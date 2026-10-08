@@ -1063,6 +1063,8 @@ public class MainActivity extends AppCompatActivity {
         tvStatus.setText(R.string.msg_scanning);
         new Thread(() -> {
             String found = null;
+            final String[] foundIpBox = {null};
+            final int[] foundPortBox = {0};
             DatagramSocket sock = null;
             try {
                 WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
@@ -1084,15 +1086,48 @@ public class MainActivity extends AppCompatActivity {
                                     InetAddress.getByName(subnetBc), UvcProto.NET_BEACON_PORT));
                         } catch (Exception ignored) {}
                     }
+                    // ★ 诊断：把"发了什么、发去哪"记下来（配合下面的收包日志，
+                    //   一次点击就能分清是广播没到接收端 / 回包没回来 / 回包格式不对）
+                    Log.i(TAG, "自动搜索：已发送 " + UvcProto.NET_DISCOVER_MSG
+                            + " → 255.255.255.255:" + UvcProto.NET_BEACON_PORT
+                            + " 与子网广播 " + (subnetBc == null ? "(无)" : subnetBc + ":"
+                            + UvcProto.NET_BEACON_PORT) + "，等待应答 2.5s");
                     long deadline = System.currentTimeMillis() + 2500;
                     byte[] buf = new byte[256];
                     while (System.currentTimeMillis() < deadline) {
                         DatagramPacket pkt = new DatagramPacket(buf, buf.length);
                         try { sock.receive(pkt); } catch (java.net.SocketTimeoutException e) { continue; }
                         String reply = new String(pkt.getData(), 0, pkt.getLength(), "UTF-8");
+                        // ★★ 诊断关键行：收到的**每一个**包都记下来，含来源地址与原文。
+                        //    "搜不到"时靠它分清三种情况：
+                        //      ① 一条都没有 → 广播没到达接收端（防火墙/AP 隔离/非同一网段）
+                        //      ② 有包但前缀不符 → 回包格式问题
+                        //      ③ 正常命中 → 解析或后续使用端口的问题
+                        Log.i(TAG, "自动搜索：收到包 ← " + pkt.getAddress().getHostAddress()
+                                + ":" + pkt.getPort() + " len=" + pkt.getLength()
+                                + " 内容=" + reply);
                         if (reply.startsWith(UvcProto.NET_REPLY_PREFIX)) {
-                            String ip = reply.substring(UvcProto.NET_REPLY_PREFIX.length()).trim();
-                            if (!TextUtils.isEmpty(ip)) { found = ip; break; }
+                            String host = reply.substring(UvcProto.NET_REPLY_PREFIX.length()).trim();
+                            // ★ 接收端可能把**实际**视频端口捎回来（格式 "ip" 或 "ip:port"）：
+                            //   它监听的 5000 被系统/其它软件占用时会自动顺延到别的端口，
+                            //   只取 IP 会一直往 5000 发 → 完全没有画面（用户实测报障）。
+                            //   端口等于默认值时接收端仍回旧格式（只有 IP），此处兼容。
+                            if (!TextUtils.isEmpty(host)) {
+                                found = host;
+                                int c = host.lastIndexOf(':');
+                                if (c > 0 && c < host.length() - 1) {
+                                    foundIpBox[0] = host.substring(0, c).trim();
+                                    try {
+                                        foundPortBox[0] = Integer.parseInt(host.substring(c + 1).trim());
+                                    } catch (Exception ignored) {
+                                        foundPortBox[0] = 0;
+                                    }
+                                } else {
+                                    foundIpBox[0] = host;
+                                    foundPortBox[0] = 0;
+                                }
+                                break;
+                            }
                         }
                     }
                 } finally {
@@ -1103,14 +1138,22 @@ public class MainActivity extends AppCompatActivity {
                 Log.e(TAG, "discover failed", e);
             }
             final String f = found;
+            final String fIp = foundIpBox[0];
+            final int fPort = foundPortBox[0];
+            Log.i(TAG, "自动搜索：结果 found=" + f + " ip=" + fIp + " port=" + fPort);
             runOnUiThread(() -> {
                 btnScan.setEnabled(true);
-                if (f != null) {
-                    etIp.setText(f);
-                    tvStatus.setText(getString(R.string.msg_pc_found, f));
-                } else {
+                if (f == null) {
                     tvStatus.setText(R.string.msg_pc_not_found);
+                    return;
                 }
+                etIp.setText(fIp != null ? fIp : f);
+                if (fPort > 0) {
+                    // ★ 接收端 5000 被占用时会顺延，这里自动跟随其真实端口（用户无需设置）
+                    etPort.setText(String.valueOf(fPort));
+                    Log.i(TAG, "自动搜索：接收端实际视频端口 = " + fPort);
+                }
+                tvStatus.setText(getString(R.string.msg_pc_found, f));
             });
         }, "uvc-discover").start();
     }
