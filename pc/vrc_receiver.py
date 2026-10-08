@@ -819,6 +819,9 @@ class MainWindow(QMainWindow):
         self.worker.meta_ready.connect(self.on_meta)
         self.worker.stats_ready.connect(self.on_stats)
         self.worker.log_line.connect(lambda s: self.statusBar().showMessage(s, 6000))
+        # ★ 端口被占会自动顺延（StreamWorker.port 在绑定成功后才更新）——
+        #   顺带刷新中央提示里的 IP:端口，避免用户照抄请求端口（客户机实测报障）。
+        self.worker.log_line.connect(lambda _s: self._update_hint())
         self.worker.start()
 
         # 虚拟 UVC 摄像头输出（可选：--vcam auto/数字 开启；默认关闭避免占用设备）
@@ -866,11 +869,15 @@ class MainWindow(QMainWindow):
             ip = receiver.local_ip()
         except Exception:
             ip = "0.0.0.0"
+        # ★★ 必须显示**实际绑定成功**的端口：5000 被占用时 StreamWorker 会自动顺延
+        #    （绑定成功后它自己的 .port 才是真值）。界面若仍写请求端口，用户照抄就填错
+        #    —— 客户机实测报障："提示改成 5002 了但窗口内显示还是 5000"。
+        port = getattr(self.worker, "port", None) or self._port
         self.hint.setText(
             f"<div style='color:#dddddd; font-size:17px;'>{t('hint_msg')}</div>"
             f"<div style='height:28px;'></div>"
             f"<div style='color:#ff8a1f; font-size:38px; font-weight:bold;'>"
-            f"{ip}:{self._port}</div>")
+            f"{ip}:{port}</div>")
 
     def _create_panel(self, sid):
         url = f"http://127.0.0.1:{self.mjpeg_port}/cam/{sid}" if self.mjpeg_port else None
