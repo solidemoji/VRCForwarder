@@ -18,7 +18,9 @@ import json
 import os
 import socket
 import struct
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -40,12 +42,12 @@ if os.name == "nt":
     except Exception:
         pass
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, QProcess, Signal
 from PySide6.QtGui import QAction, QColor, QImage, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QPushButton, QScrollArea, QGridLayout, QSystemTrayIcon, QMenu,
-    QStyle, QFrame, QLineEdit, QMessageBox, QPlainTextEdit,
+    QStyle, QFrame, QLineEdit, QMessageBox, QPlainTextEdit, QTabWidget, QComboBox,
 )
 
 import vrc_protocol as receiver  # 复用: MAGIC/HEADER_LEN/Reassembler/beacon_loop/local_ip 等
@@ -56,7 +58,159 @@ MAX_STREAMS = receiver.MAX_STREAMS
 
 # ★★ 版本号单一口径：界面上会显示（标题栏 / 状态栏常驻 / 中央提示），
 #    打包脚本 read_version 会从这里读出来生成安装包版本 —— 不要在多处手改。
-APP_VERSION = "0.0.11"
+APP_VERSION = "0.3.0"
+
+
+def force_dark(app):
+    """固定深色外观。
+
+    本程序 UI 是按深色设计的（大量硬编码深色背景 + 浅色文字）。
+    跟随系统时，一旦系统是浅色模式，Qt 会把对话框/下拉/滚动条等控件
+    染成浅色，与硬编码深色背景混在一起 → 配色错乱（用户实测报障）。
+    这里直接固定深色，不再跟随系统主题。
+    """
+    try:                                     # Qt ≥ 6.5：直接声明用深色方案
+        app.styleHints().setColorScheme(Qt.ColorScheme.Dark)
+    except Exception:
+        pass
+    try:
+        app.setStyle("Fusion")
+    except Exception:
+        pass
+    pal = QPalette()
+    BG, CARD, FG, DIM = (QColor("#141416"), QColor("#1b1b1f"),
+                         QColor("#e8e8e8"), QColor("#7a7a7a"))
+    ACC = QColor("#ff7a00")
+    for role, col in ((QPalette.Window, BG), (QPalette.WindowText, FG),
+                      (QPalette.Base, CARD), (QPalette.AlternateBase, QColor("#202024")),
+                      (QPalette.ToolTipBase, CARD), (QPalette.ToolTipText, FG),
+                      (QPalette.Text, FG), (QPalette.Button, CARD),
+                      (QPalette.ButtonText, FG), (QPalette.BrightText, ACC),
+                      (QPalette.Link, ACC), (QPalette.Highlight, ACC),
+                      (QPalette.HighlightedText, QColor("#1a1a1a")),
+                      (QPalette.PlaceholderText, DIM)):
+        pal.setColor(role, col)
+    for role in (QPalette.Text, QPalette.ButtonText, QPalette.WindowText):
+        pal.setColor(QPalette.Disabled, role, DIM)
+    app.setPalette(pal)
+
+
+# =====================================================================
+#  用户设置（目前只有语言）：%LOCALAPPDATA%\VRCReceiver\settings.json
+# =====================================================================
+SETTINGS_PATH = os.path.join(
+    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+    "VRCReceiver", "settings.json")
+
+
+def load_settings() -> dict:
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_settings(d: dict):
+    try:
+        os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+# =====================================================================
+#  防火墙自检 / 一键修复（Windows）
+#  背景：客户机上「App 搜不到 + 手输 IP 也连不上 + 接收端一包没收到」，
+#        根因几乎都是入站 UDP 没被放行（安装时选了「仅为我安装」→ 规则一条都没加）。
+#        这里在启动时自检，缺失就在界面上明确提示，并可一键提权修复。
+# =====================================================================
+FW_UDP_RULE = "VRCReceiver UDP 5000-5020"
+FW_TCP_RULE = "VRCReceiver TCP 8080-8090"
+FW_LEGACY = ("VRCReceiver UDP 5000", "VRCReceiver MJPEG TCP 8080")
+
+
+def _nowindow():
+    return 0x08000000 if os.name == "nt" else 0
+
+
+def _netsh_path():
+    return os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                        "System32", "netsh.exe")
+
+
+def _run_quiet(cmd, timeout=8):
+    try:
+        p = subprocess.run(cmd, capture_output=True, timeout=timeout,
+                           creationflags=_nowindow())
+        out = (p.stdout or b"").decode("mbcs", "ignore")
+        err = (p.stderr or b"").decode("mbcs", "ignore")
+        return p.returncode, out, err
+    except Exception as e:
+        return -1, "", str(e)
+
+
+def firewall_check():
+    """返回 (是否OK, 原因代码, 附加信息)；原因代码: ok / missing / block / error"""
+    if os.name != "nt":
+        return True, "ok", ""
+    netsh = _netsh_path()
+    missing = []
+    for name in (FW_UDP_RULE, FW_TCP_RULE):
+        rc, out, err = _run_quiet([netsh, "advfirewall", "firewall",
+                                   "show", "rule", "name=" + name])
+        if rc != 0:
+            missing.append(name)
+    # 阻止规则优先级高于放行规则 —— 必须单独查（管理员装也一样中招）
+    block = ""
+    rc, out, err = _run_quiet([
+        "powershell", "-NoProfile", "-Command",
+        "Get-NetFirewallRule -Enabled True -Direction Inbound -Action Block | "
+        "Where-Object { $_.DisplayName -like '*VRC*' } | "
+        "Select-Object -First 1 -ExpandProperty DisplayName"])
+    if rc == 0 and out.strip():
+        block = out.strip().splitlines()[0]
+    if block:
+        return False, "block", block
+    if missing:
+        return False, "missing", ", ".join(missing)
+    return True, "ok", ""
+
+
+def firewall_fix(timeout=30):
+    """弹一次 UAC，把放行规则加上（幂等）。返回是否真的修好了。"""
+    if os.name != "nt":
+        return True
+    netsh = _netsh_path()
+    cmds = []
+    for name in (FW_UDP_RULE, FW_TCP_RULE) + FW_LEGACY:
+        cmds.append(f'"{netsh}" advfirewall firewall delete rule name="{name}"')
+    cmds.append(f'"{netsh}" advfirewall firewall add rule name="{FW_UDP_RULE}" '
+                f'dir=in action=allow protocol=UDP localport=5000-5020 profile=any')
+    cmds.append(f'"{netsh}" advfirewall firewall add rule name="{FW_TCP_RULE}" '
+                f'dir=in action=allow protocol=TCP localport=8080-8090 profile=any')
+    bat = os.path.join(tempfile.gettempdir(), "vrc_fix_firewall.bat")
+    try:
+        with open(bat, "w", encoding="ascii", errors="ignore") as f:
+            f.write("@echo off\r\n")
+            for c in cmds:
+                f.write(c + "\r\n")
+        import ctypes
+        rc = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", "cmd.exe", '/c "%s"' % bat, None, 0)
+        if int(rc) <= 32:        # 用户取消了 UAC
+            return False
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            ok, reason, _info = firewall_check()
+            if ok:
+                return True
+            time.sleep(0.8)
+    except Exception:
+        return False
+    return False
 
 
 def _candidate_ports(want, span=10):
@@ -77,6 +231,7 @@ def _candidate_ports(want, span=10):
 class StreamWorker(QThread):
     frame_ready = Signal(int, bytes)          # sid, jpeg
     new_stream = Signal(int)                  # 首次收到某 sid 的帧
+    stream_specs = Signal(int, list, dict)    # sid, 支持的规格组合, 当前规格
     meta_ready = Signal(int, str, str, str)   # sid, name, kind, key(稳定设备key)
     stats_ready = Signal(int, str)            # sid, 统计文本
     log_line = Signal(str)                    # 界面日志
@@ -91,6 +246,7 @@ class StreamWorker(QThread):
         self._t0 = {}        # sid -> time
         self._last_bytes = {}  # sid -> 字节计数
         self._announced = set()
+        self.last_addr = {}          # sid -> (ip, port) 发送方地址
         # 最新完整帧缓存（供 MJPEG 桥/其它消费方读取）
         self.latest = {}     # sid -> jpeg bytes
         self.latest_seq = {}  # sid -> 序号(消费方判断新帧)
@@ -151,7 +307,7 @@ class StreamWorker(QThread):
                     st["frames"] = st["dup"] = st["bad"] = st["bytes"] = 0
                     self._t0[sid] = now
             try:
-                data, _ = sock.recvfrom(receiver.PAYLOAD_MAX + receiver.HEADER_LEN + 16)
+                data, addr = sock.recvfrom(receiver.PAYLOAD_MAX + receiver.HEADER_LEN + 16)
             except socket.timeout:
                 continue
             except ConnectionResetError:
@@ -179,6 +335,8 @@ class StreamWorker(QThread):
                         if k:
                             self.meta_key[msid] = k
                             self.sid_by_key[k] = msid
+                        if isinstance(m.get("specs"), list):
+                            self.stream_specs.emit(msid, m["specs"], m.get("cur") or {})
                         self.meta_ready.emit(msid, self.meta_name.get(msid, ""),
                                              str(m.get("kind", "")), k)
                 except Exception:
@@ -186,6 +344,8 @@ class StreamWorker(QThread):
                 continue
             if sid >= MAX_STREAMS:
                 continue
+            if addr and self.last_addr.get(sid) != addr:
+                self.last_addr[sid] = addr
 
             if sid not in self._reasm:
                 self._reasm[sid] = receiver.Reassembler()
@@ -276,6 +436,8 @@ class CameraView(QWidget):
 # 单路画面面板: 标题 + 画面 + 开关 + 统计
 # =====================================================================
 class CameraPanel(QFrame):
+    spec_changed = Signal(int, dict)      # sid, {w,h,fps,fmt}
+
     def __init__(self, sid, display_fps=60, url=None, parent=None):
         super().__init__(parent)
         self.sid = sid
@@ -310,6 +472,20 @@ class CameraPanel(QFrame):
         self.btn.clicked.connect(self.toggle)
         head.addWidget(self.btn)
         lay.addLayout(head)
+
+        # 相机规格（真实设备是离散组合，只能从设备上报的组合里选）
+        spec_row = QHBoxLayout()
+        self.cmbSpec = QComboBox()
+        self.cmbSpec.setMinimumWidth(190)
+        self._specs = []
+        self.cmbSpec.blockSignals(True)
+        self.cmbSpec.addItem(t("spec_wait"))
+        self.cmbSpec.setEnabled(False)
+        self.cmbSpec.blockSignals(False)
+        spec_row.addWidget(self.cmbSpec)
+        spec_row.addStretch(1)
+        lay.addLayout(spec_row)
+        self.cmbSpec.currentIndexChanged.connect(self._emit_spec)
 
         # 画面(自绘等比视图: 不拉伸变形，绘制开销同 setScaledContents)
         self.view = CameraView()
@@ -386,6 +562,42 @@ class CameraPanel(QFrame):
                 lan.setCursorPosition(0)
         except Exception:
             pass
+
+    def set_specs(self, specs, cur=None):
+        """填入设备真实支持的规格组合，并选中当前正在用的那个。
+
+        自动档时发送端不上报 cur —— 此时插入「自动」占位项，绝不默认选中第一项
+        （否则会把 320x240@120 显示成当前规格，跟实际画面不符）。
+        """
+        self._specs = list(specs or [])
+        self._spec_off = 0
+        self.cmbSpec.blockSignals(True)
+        self.cmbSpec.clear()
+        if not self._specs:
+            self.cmbSpec.addItem(t("spec_wait"))
+            self.cmbSpec.setEnabled(False)
+        else:
+            for s in self._specs:
+                self.cmbSpec.addItem(f"{s.get('w')}x{s.get('h')}@{s.get('fps')} {s.get('fmt', '')}")
+            self.cmbSpec.setEnabled(True)
+            matched = False
+            if cur:
+                for i, s in enumerate(self._specs):
+                    if (s.get("w"), s.get("h"), s.get("fps"), s.get("fmt")) == \
+                       (cur.get("w"), cur.get("h"), cur.get("fps"), cur.get("fmt")):
+                        self.cmbSpec.setCurrentIndex(i)
+                        matched = True
+                        break
+            if not matched:
+                self.cmbSpec.insertItem(0, t("spec_auto"))
+                self._spec_off = 1
+                self.cmbSpec.setCurrentIndex(0)
+        self.cmbSpec.blockSignals(False)
+
+    def _emit_spec(self, idx=0):
+        i = idx - getattr(self, "_spec_off", 0)
+        if 0 <= i < len(self._specs):
+            self.spec_changed.emit(self.sid, dict(self._specs[i]))
 
     def toggle(self):
         self._enabled = not self._enabled
@@ -769,6 +981,10 @@ class MjpegBridge:
 # 主窗口
 # =====================================================================
 class MainWindow(QMainWindow):
+    # 防火墙自检结果（跨线程回主线程；reason: ok/missing/block）
+    fw_state = Signal(bool, str, str)
+    fw_log = Signal(str)
+
     def __init__(self, port, display_fps=60, mjpeg_port=8080, mjpeg_fps=60,
                  vcam=None, vcam_fps=60, mjpeg_max_width=0):
         super().__init__()
@@ -811,13 +1027,49 @@ class MainWindow(QMainWindow):
             "background:#0d0d0d; color:#a8b0b8; border:0; border-top:1px solid #333;"
             "font-family:Consolas,\"Courier New\",monospace; font-size:12px;")
 
-        _central = QWidget()
-        _vbox = QVBoxLayout(_central)
+        # ★ 防火墙自检提示条（默认隐藏；缺失放行规则 / 存在阻止规则时显示）
+        self.fwbar = QWidget()
+        self.fwbar.setStyleSheet("background:#2a1a08; border-top:1px solid #ff7a00;")
+        _fbl = QHBoxLayout(self.fwbar)
+        _fbl.setContentsMargins(10, 6, 10, 6)
+        self.fwlabel = QLabel()
+        self.fwlabel.setWordWrap(True)
+        self.fwlabel.setStyleSheet("color:#ffcf9e; font-size:13px; border:0;")
+        _fbl.addWidget(self.fwlabel, 1)
+        self.fwbtn = QPushButton(t("fw_fix_btn"))
+        self.fwbtn.setCursor(Qt.PointingHandCursor)
+        self.fwbtn.setStyleSheet(
+            "QPushButton{background:#ff7a00; color:#1a1a1a; border:0;"
+            "border-radius:4px; padding:6px 14px; font-weight:bold;}"
+            "QPushButton:disabled{background:#7a5a3a; color:#e0e0e0;}")
+        self.fwbtn.clicked.connect(self._on_fw_fix)
+        _fbl.addWidget(self.fwbtn, 0)
+        self.fwbar.setVisible(False)
+
+        _recv_page = QWidget()
+        _vbox = QVBoxLayout(_recv_page)
         _vbox.setContentsMargins(0, 0, 0, 0)
         _vbox.setSpacing(0)
         _vbox.addWidget(scroll, 1)
+        _vbox.addWidget(self.fwbar)
         _vbox.addWidget(self.logview)
-        self.setCentralWidget(_central)
+
+        # ★ 选项卡：① 接收端 ② Steam Frame 一键安装
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet(
+            "QTabWidget::pane{border:0;}"
+            "QTabBar::tab{background:#1b1b1f; color:#9aa0a6; padding:7px 18px; border:0;"
+            "border-top-left-radius:4px; border-top-right-radius:4px;}"
+            "QTabBar::tab:selected{background:#ff7a00; color:#1a1a1a; font-weight:bold;}")
+        self.tabs.addTab(_recv_page, t("tab_receiver"))
+        try:
+            import frame_tab
+            self.frame_tab = frame_tab.FrameTab()
+            self.tabs.addTab(self.frame_tab, t("tab_frame"))
+        except Exception as e:
+            # 缺 paramiko 等依赖时不影响接收端主功能
+            self._append_log(f"Steam Frame 选项卡不可用: {e}")
+        self.setCentralWidget(self.tabs)
 
         # 中央提示：尚无画面时占满窗口中央，大字告知「同一局域网 + 要填入 VR 端 App 的 IP:端口」
         self._port = port
@@ -838,10 +1090,30 @@ class MainWindow(QMainWindow):
         _ver.setStyleSheet("color:#888888; padding-right:8px;")
         self.statusBar().addPermanentWidget(_ver)
 
+        # ★ 语言手动切换（切换后自动重启生效）
+        self.langCombo = QComboBox()
+        self.langCombo.setStyleSheet(
+            "QComboBox{background:#1b1b1f; color:#d0d0d0; border:1px solid #333;"
+            "border-radius:4px; padding:2px 8px; font-size:12px;}")
+        self.langCombo.addItem(t("lang_auto"), "auto")
+        for _c in i18n.LANGS:
+            self.langCombo.addItem(i18n.LANG_NAMES[_c], _c)
+        _cur = "auto" if getattr(i18n, "FOLLOW_SYSTEM", False) else i18n.LANG
+        _idx = self.langCombo.findData(_cur)
+        self.langCombo.setCurrentIndex(_idx if _idx >= 0 else 0)
+        self.langCombo.currentIndexChanged.connect(self._on_lang_changed)
+        self.statusBar().addPermanentWidget(self.langCombo)
+
+        # ★ 防火墙自检：启动后 1.2 秒跑一次（后台线程，不阻塞界面）
+        self.fw_state.connect(self._on_fw_state)
+        self.fw_log.connect(self._append_log)
+        QTimer.singleShot(1200, self._fw_check_start)
+
         # 启动接收线程
         self.worker = StreamWorker(port)
         self.worker.frame_ready.connect(self.on_frame)
         self.worker.new_stream.connect(self.on_new_stream)
+        self.worker.stream_specs.connect(self.on_specs)
         self.worker.meta_ready.connect(self.on_meta)
         self.worker.stats_ready.connect(self.on_stats)
         self.worker.log_line.connect(lambda s: self.statusBar().showMessage(s, 6000))
@@ -962,9 +1234,74 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    # ---------------- 语言切换 ----------------
+    def _on_lang_changed(self, _idx):
+        code = self.langCombo.currentData() or "auto"
+        s = load_settings()
+        s["lang"] = code
+        save_settings(s)
+        QMessageBox.information(self, t("lang_title"), t("lang_restart"))
+        self._relaunch()
+
+    def _relaunch(self):
+        """带参数重启自己（去掉旧的 --lang，让新设置生效）。"""
+        args, skip = [], False
+        for a in sys.argv[1:]:
+            if skip:
+                skip = False
+                continue
+            if a == "--lang":
+                skip = True
+                continue
+            if a.startswith("--lang="):
+                continue
+            args.append(a)
+        try:
+            QProcess.startDetached(sys.executable, args)
+        except Exception:
+            pass
+        QApplication.quit()
+
+    # ---------------- 防火墙自检 / 一键修复 ----------------
+    def _fw_check_start(self):
+        threading.Thread(target=self._fw_worker, daemon=True).start()
+
+    def _fw_worker(self):
+        try:
+            ok, reason, info = firewall_check()
+        except Exception:
+            ok, reason, info = True, "ok", ""
+        self.fw_state.emit(ok, reason, info)
+
+    def _on_fw_state(self, ok, reason, info):
+        self.fwbtn.setEnabled(True)
+        self.fwbtn.setText(t("fw_fix_btn"))
+        if ok:
+            self.fwbar.setVisible(False)
+            return
+        self.fwlabel.setText(t("fw_warn_block", name=info) if reason == "block"
+                             else t("fw_warn_missing"))
+        self.fwbar.setVisible(True)
+
+    def _on_fw_fix(self):
+        self.fwbtn.setEnabled(False)
+        self.fwbtn.setText(t("fw_fixing"))
+
+        def work():
+            fixed = firewall_fix()
+            try:
+                ok, reason, info = firewall_check()
+            except Exception:
+                ok, reason, info = bool(fixed), "ok", ""
+            self.fw_state.emit(ok, reason, info)
+            self.fw_log.emit(t("fw_ok") if ok else t("fw_failed"))
+
+        threading.Thread(target=work, daemon=True).start()
+
     def _append_log(self, msg):
         """写入窗口内常驻日志（带时间戳，供自查与客户报障）"""
         try:
+            msg = i18n.log_line(msg)
             self.logview.appendPlainText(f"{time.strftime('%H:%M:%S')}  {msg}")
         except Exception:
             pass
@@ -975,7 +1312,7 @@ class MainWindow(QMainWindow):
         k = st.get("kind")
         if k == "ready":
             n = st.get("count", 0)
-            return f"自动搜索 OK · 已应答 {n} 次" if n else "自动搜索 OK · 尚未收到查询"
+            return t("hint_auto_ok", n=n) if n else t("hint_auto_waiting")
         if k == "fail":
             who = st.get("who") or ""
             return (f"自动搜索不可用（端口 {receiver.BEACON_PORT} 已被占用"
@@ -1008,12 +1345,36 @@ class MainWindow(QMainWindow):
         url = f"http://127.0.0.1:{self.mjpeg_port}/cam/{sid}" if self.mjpeg_port else None
         panel = CameraPanel(sid, self.display_fps, url)
         self.panels[sid] = panel
+        panel.spec_changed.connect(self.on_spec_changed)
         col = sid % 2
         row = sid // 2
         self.grid.addWidget(panel, row, col)
         # 已经收到画面 -> 撤掉中央提示
         self.hint.hide()
         return panel
+
+    def on_specs(self, sid, specs, cur):
+        panel = self.panels.get(sid)
+        if panel is None:
+            panel = self._create_panel(sid)
+            panel.mark_active()
+        panel.set_specs(specs, cur)
+
+    def on_spec_changed(self, sid, spec):
+        """把面板上选的规格回发给该路发送端（Frame/安卓）。"""
+        addr = getattr(self.worker, "last_addr", {}).get(sid)
+        if not addr:
+            self.statusBar().showMessage(t("spec_no_addr"), 4000)
+            return
+        payload = dict(spec)
+        payload["sid"] = sid
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.sendto(receiver.pack_cfg(payload), addr)
+            desc = f"{spec['w']}x{spec['h']}@{spec['fps']}fps {spec['fmt']}"
+            self.statusBar().showMessage(t("spec_sent", spec=desc), 5000)
+        except Exception as e:
+            self.statusBar().showMessage(f"{type(e).__name__}: {e}", 6000)
 
     def on_new_stream(self, sid):
         if sid in self.panels:
@@ -1101,11 +1462,14 @@ def main():
         _show_help_dialog(ap)
         return
 
-    # 语言：显式 --lang 优先，否则跟随系统，不支持的语言回退英语
-    i18n.init(args.lang)
+    # 语言：--lang 优先 > 上次手动选择 > 跟随系统（不支持的语言回退英语）
+    _saved_lang = load_settings().get("lang", "auto")
+    i18n.init(args.lang or (None if _saved_lang == "auto" else _saved_lang))
+    i18n.FOLLOW_SYSTEM = (args.lang is None and _saved_lang == "auto")
 
     app = QApplication([])
     app.setApplicationName("VRCReceiver")
+    force_dark(app)          # ★ 固定深色，避免系统浅色模式配色错乱
     vcam = None if args.vcam == "off" else (
         "auto" if args.vcam == "auto" else int(args.vcam))
     win = MainWindow(args.port, args.display_fps, args.mjpeg_port,

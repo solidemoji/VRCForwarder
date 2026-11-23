@@ -54,6 +54,8 @@ public class UsbForwardService extends Service {
         UvcStreamer bulk;
         IsoUvcSession iso;
         boolean active = false;
+        String specsJson;          // 支持的规格组合(JSON 数组)，供接收端下拉
+        long lastFrames;           // 上次检查时的已发送帧数
     }
 
     private UsbManager usbManager;
@@ -343,6 +345,9 @@ public class UsbForwardService extends Service {
         FrameSender fs = new FrameSender((sent, frags, qd) ->
                 Log.d(TAG, "net s" + sid + ": frames=" + sent));
         fs.setStreamId(sid);
+        // ★ 反向控制：接收端可下发规格（仅新增监听，不影响收流/发送逻辑）
+        final UsbDevice specDev = dev;
+        fs.setSpecListener((rsid, w, h, fps, fmt) -> applyRemoteSpec(specDev, w, h, fps, fmt));
         try {
             fs.start(targetIp, targetPort);
         } catch (Exception e) {
@@ -364,6 +369,22 @@ public class UsbForwardService extends Service {
         } catch (Exception e) {
             Log.w(TAG, "读名连接打开失败，重发授权请求: " + e.getMessage());
             requestSvcPermission(dev);
+        }
+        // 能力表只读一次并缓存：切换规格走的是「停→起」，若每次都全量枚举描述符，
+        // 容易和旧会话的释放撞上（相机卡死）。缓存后后续启动零开销。
+        final String specKey = UvcStreamer.deviceKey(dev);
+        slot.specsJson = getSharedPreferences("uvc_spec_cache", MODE_PRIVATE)
+                .getString(specCacheKey(specKey), null);
+        if (slot.specsJson == null && slot.conn != null) {
+            try {
+                slot.specsJson = buildSpecsJson(UvcDescriptors.read(slot.conn, dev));
+                if (slot.specsJson != null) {
+                    getSharedPreferences("uvc_spec_cache", MODE_PRIVATE).edit()
+                            .putString(specCacheKey(specKey), slot.specsJson).apply();
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "读规格表失败: " + e.getMessage());
+            }
         }
         try {
             if (kind == UvcStreamer.UvcKind.BULK) {
@@ -407,6 +428,13 @@ public class UsbForwardService extends Service {
         }
         slots[sid] = slot;
         slot.active = true;
+        // ★ 无帧自愈：切换规格后某些相机可能停在"已连上但不出帧"的状态，
+        //   6 秒内没有新帧就自动重启这一路（最多 2 次），避免只能靠插拔恢复。
+        final String watchKey = dev.getDeviceName();
+        final int sidWatch = sid;
+        final UsbDevice devWatch = dev;
+        slot.lastFrames = fs.getSentFrames();
+        slotHandler.postDelayed(() -> checkSlotAlive(sidWatch, devWatch), 6000);
         updateNotification(forwardingText());
         broadcast(getString(R.string.svc_joined, label, kind));
         deviceStateBroadcast(dev.getDeviceName(), true);
@@ -420,11 +448,153 @@ public class UsbForwardService extends Service {
             Slot s = findSlotByDevice(dev);
             if (s == null || s.sender == null) return;
             String key = UvcStreamer.deviceKey(dev);
-            s.sender.sendMeta("{\"sid\":" + sid + ",\"name\":\""
-                    + UvcStreamer.jsonEscape(UvcStreamer.deviceDisplayName(dev, s.conn))
-                    + "\",\"kind\":\"" + UvcStreamer.classify(dev)
-                    + "\",\"key\":\"" + UvcStreamer.jsonEscape(key) + "\"}");
+            StringBuilder js = new StringBuilder("{\"sid\":").append(sid)
+                    .append(",\"name\":\"").append(UvcStreamer.jsonEscape(
+                            UvcStreamer.deviceDisplayName(dev, s.conn)))
+                    .append("\",\"kind\":\"").append(UvcStreamer.classify(dev))
+                    .append("\",\"key\":\"").append(UvcStreamer.jsonEscape(key)).append('"');
+            // 支持的规格组合（接收端据此列出可选项）
+            if (s.specsJson != null) {
+                js.append(",\"specs\":").append(s.specsJson);
+                // ★ 优先上报「实际生效」的规格（自动档时偏好是空，只有它才准）
+                String curJson = null;
+                if (s.iso != null) curJson = specTextToJson(s.iso.getActiveSpecText());
+                if (curJson == null) {
+                    UvcSpecPrefs.Spec cur = UvcSpecPrefs.parse(UvcSpecPrefs.get(this, key));
+                    if (cur != null) {
+                        curJson = "{\"w\":" + cur.width + ",\"h\":" + cur.height
+                                + ",\"fps\":" + cur.fps + ",\"fmt\":\""
+                                + (cur.frameFormat == UvcDescriptors.FRAME_FORMAT_MJPEG ? "MJPG" : "YUYV")
+                                + "\"}";
+                    }
+                }
+                if (curJson != null) js.append(",\"cur\":").append(curJson);
+            }
+            js.append('}');
+            s.sender.sendMeta(js.toString());
         } catch (Exception ignored) {}
+    }
+
+    /**
+     * 接收端下发的规格：写入该设备的规格偏好，再用现有「停 → 起」流程重启这一路。
+     * 只调用既有接口，不改动识别与发送逻辑。
+     */
+    private void applyRemoteSpec(UsbDevice dev, int w, int h, int fps, String fmt) {
+        try {
+            if (w <= 0 || h <= 0) return;
+            int frameFormat = ("MJPG".equalsIgnoreCase(fmt) || "MJPEG".equalsIgnoreCase(fmt))
+                    ? UvcDescriptors.FRAME_FORMAT_MJPEG : UvcDescriptors.FRAME_FORMAT_YUYV;
+            String key = UvcStreamer.deviceKey(dev);
+            UvcSpecPrefs.set(this, key, UvcSpecPrefs.encode(frameFormat, w, h, fps));
+            Log.i(TAG, "远端规格已保存: " + key + " -> " + w + "x" + h + "@" + fps + " " + fmt);
+            broadcast("规格已切换: " + w + "x" + h + "@" + fps + " " + fmt);
+            restartSlotByDevice(dev);
+        } catch (Exception e) {
+            Log.w(TAG, "远端规格应用失败: " + e);
+        }
+    }
+
+    /** 在 USB 线程里重启该设备所在的槽（与界面切换规格同一条路径） */
+    private void restartSlotByDevice(final UsbDevice dev) {
+        slotHandler.post(() -> {
+            int idx = -1;
+            for (int i = 0; i < slots.length; i++) {
+                Slot s = slots[i];
+                if (s != null && s.active && s.device != null && s.device.equals(dev)) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx < 0) return;
+            final int sid = slots[idx].sid;
+            stopAndFreeSlotOnThread(idx, false);
+            slotHandler.postDelayed(() -> startSlotOnThread(sid, dev), 700);
+        });
+    }
+
+    /** "MJPEG 640x320@30" / "640x320" → {"w":640,"h":320,"fps":30,"fmt":"MJPG"} */
+    private static String specTextToJson(String t) {
+        if (t == null || t.trim().isEmpty()) return null;
+        try {
+            String s = t.trim();
+            String fmt = (s.startsWith("YUYV")) ? "YUYV" : "MJPG";
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("(\\d+)\\s*x\\s*(\\d+)(?:\\s*@\\s*(\\d+))?").matcher(s);
+            if (!m.find()) return null;
+            int w = Integer.parseInt(m.group(1));
+            int h = Integer.parseInt(m.group(2));
+            int fps = (m.group(3) != null) ? Integer.parseInt(m.group(3)) : 0;
+            return "{\"w\":" + w + ",\"h\":" + h + ",\"fps\":" + fps + ",\"fmt\":\"" + fmt + "\"}";
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String specCacheKey(String key) {
+        return key == null ? "unknown" : key.replace(':', '_').replace(' ', '_');
+    }
+
+    private final java.util.HashMap<String, Integer> retryMap = new java.util.HashMap<>();
+
+    /** 6 秒没有新帧 → 自动重启这一路（最多 2 次），免得只能靠插拔恢复 */
+    private void checkSlotAlive(int sid, UsbDevice dev) {
+        try {
+            Slot s = slots[sid];
+            if (s == null || !s.active || s.device == null || !s.device.equals(dev)) return;
+            long now = (s.sender != null) ? s.sender.getSentFrames() : -1;
+            if (now > s.lastFrames) {                       // 正常出帧
+                retryMap.remove(dev.getDeviceName());
+                return;
+            }
+            if (s.sender != null) s.lastFrames = now;
+            String key = dev.getDeviceName();
+            int n = retryMap.getOrDefault(key, 0);
+            Log.w(TAG, "该路 6 秒无新帧 sid=" + sid + " dev=" + key + " 已重试=" + n);
+            if (n >= 2) {
+                broadcast("该路无画面，请插拔相机");
+                return;
+            }
+            retryMap.put(key, n + 1);
+            stopAndFreeSlotOnThread(sid, false);
+            slotHandler.postDelayed(() -> startSlotOnThread(sid, dev), 1500);
+        } catch (Exception e) {
+            Log.w(TAG, "无帧自愈异常: " + e);
+        }
+    }
+
+    /** 能力表 → 规格 JSON（受单包 1200 字节限制，超长截断） */
+    private static String buildSpecsJson(java.util.List<UvcDescriptors.Format> table) {
+        if (table == null || table.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder("[");
+        java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+        outer:
+        for (UvcDescriptors.Format f : table) {
+            String fmt = (f.frameFormat == UvcDescriptors.FRAME_FORMAT_MJPEG) ? "MJPG" : "YUYV";
+            for (UvcDescriptors.Frame fr : f.frames) {
+                if (fr.width <= 0 || fr.height <= 0) continue;
+                float[] fpss = fr.fps();
+                if (fpss.length == 0) {
+                    if (!seen.add(fmt + fr.width + fr.height)) continue;
+                    if (!appendSpec(sb, fmt, fr.width, fr.height, 0)) break outer;
+                } else {
+                    for (float v : fpss) {
+                        int r = Math.round(v);
+                        if (r <= 0 || !seen.add(fmt + fr.width + fr.height + r)) continue;
+                        if (!appendSpec(sb, fmt, fr.width, fr.height, r)) break outer;
+                    }
+                }
+            }
+        }
+        sb.append(']');
+        return sb.length() > 2 ? sb.toString() : null;
+    }
+
+    private static boolean appendSpec(StringBuilder sb, String fmt, int w, int h, int fps) {
+        String item = (sb.length() > 1 ? "," : "") + "{\"fmt\":\"" + fmt + "\",\"w\":" + w
+                + ",\"h\":" + h + ",\"fps\":" + fps + "}";
+        if (sb.length() + item.length() + 2 > 1100) return false;   // 留给 meta 其它字段
+        sb.append(item);
+        return true;
     }
 
     /** 槽线程内：拔出设备只停对应槽 */

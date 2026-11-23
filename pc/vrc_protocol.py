@@ -26,6 +26,27 @@ import numpy as np
 MAGIC = b"UV"
 HEADER_LEN = 11          # magic2 + stream_id1 + seq4 + fidx2 + fcnt2
 PAYLOAD_MAX = 1200
+
+# ★ 反向控制通道：接收端 → 发送端 下发相机规格
+#   b"UC" + JSON {"sid":0,"w":640,"h":480,"fps":30,"fmt":"MJPG"}
+CFG_MAGIC = b"UC"
+
+
+def pack_cfg(d) -> bytes:
+    import json
+    return CFG_MAGIC + json.dumps(d, ensure_ascii=False).encode("utf-8")
+
+
+def unpack_cfg(data: bytes):
+    """解析规格包；不是规格包/non-JSON 返回 None。"""
+    import json
+    if not data or not data.startswith(CFG_MAGIC):
+        return None
+    try:
+        d = json.loads(data[len(CFG_MAGIC):].decode("utf-8", "ignore"))
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
 BEACON_PORT = 5001
 # ★★ 应答口的**候选组**：5001 常被别的软件占用（实测客户机上被 NI 的
 #    lktsrv.exe / lkTimeSync「NI Time Synchronization」占着），绑不上就往下顺延。

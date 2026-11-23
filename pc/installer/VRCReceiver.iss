@@ -44,8 +44,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ;    做成默认非管理员的话，客户装上后规则一条都没有 ⇒ App 点自动搜索永远搜不到
 ;    （本机回环测试不受防火墙管，开发时测不出来，只有客户机暴露）。
 ;    仍保留 overrides=dialog：坚持不想提权的用户可以自己选"仅为我安装"，但那样得手动放行防火墙。
+; ★★ 强制管理员安装，不再提供「仅为我安装」：
+;    非管理员模式下 netsh 无权添加防火墙规则，客户装完会变成「程序在，但一条规则都没有」，
+;    表现为 App 搜不到、手输 IP 也不通、接收端一包收不到（客户机实测报障）。
+;    宁可不装，也不要装出一个半残的状态。
 PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=dialog
 ; 向导界面
 WizardStyle=modern
 ; 图标
@@ -66,12 +69,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; \
 ; 开机自启（可选，默认不勾）——接收端常驻使用时可勾
 Name: "autostart"; Description: "开机自动启动 {#MyAppName}（常驻接收推流时勾选）"; \
     GroupDescription: "其他选项:"; Flags: unchecked
-; 允许局域网内其它设备/软件访问拉流地址（仅在管理员安装模式下可用）
-; ★ 务必用**端口级**规则：Windows 首次运行弹窗生成的是"按程序路径"的规则，
-;   程序一换目录（重新解压/升级/换安装位置）就失效 —— 这是"接收端能看画面、
-;   但其它设备拉不到"的常见原因。
-Name: "firewall"; Description: "允许局域网内其它设备访问拉流地址（添加防火墙放行规则）"; \
-    GroupDescription: "其他选项:"; Flags: checkedonce; Check: IsAdminInstallMode
+; 防火墙放行已改为【无条件执行】，不再作为可勾选任务：
+;   之前是 checkedonce，客户取消过一次，以后升级都不会再勾上 —— 「重装也修不好」的成因。
 
 [Files]
 ; 整个 onedir 目录（含 _internal）——必须完整复制
@@ -80,7 +79,7 @@ Source: "{#SrcDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs cre
 [UninstallRun]
 ; 卸载时移除下面加的规则（名字对不上就静默失败，无副作用）
 Filename: "{sys}\netsh.exe"; \
-    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} TCP 8080"""; \
+    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} TCP 8080-8090"""; \
     Flags: runhidden
 Filename: "{sys}\netsh.exe"; \
     Parameters: "advfirewall firewall delete rule name=""{#MyAppName} UDP 5000-5020"""; \
@@ -117,18 +116,22 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
 ;    · 5002+ = 视频口被占用时自动顺延用的（见 vrc_receiver._candidate_ports）。
 ; 用**端口级**规则：Windows 首次运行弹窗生成的是"按程序路径"的规则，
 ; 程序一换目录（重新解压/升级/换安装位置）就失效。
+; ★ 无条件执行（已无 Tasks 条件）：装完规则一定会在。
+;   旧名先删掉，避免历史版本留下的窄规则（只放 5000/8080）继续占位。
 Filename: "{sys}\netsh.exe"; \
-    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} MJPEG TCP 8080"""; \
-    Flags: runhidden; Tasks: firewall
+    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} UDP 5000"""; Flags: runhidden
 Filename: "{sys}\netsh.exe"; \
-    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} UDP 5000"""; \
-    Flags: runhidden; Tasks: firewall
+    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} MJPEG TCP 8080"""; Flags: runhidden
 Filename: "{sys}\netsh.exe"; \
-    Parameters: "advfirewall firewall add rule name=""{#MyAppName} TCP 8080"" dir=in action=allow protocol=TCP localport=8080 profile=any"; \
-    Flags: runhidden; Tasks: firewall
+    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} TCP 8080"""; Flags: runhidden
+Filename: "{sys}\netsh.exe"; \
+    Parameters: "advfirewall firewall delete rule name=""{#MyAppName} UDP 5000-5020"""; Flags: runhidden
+Filename: "{sys}\netsh.exe"; \
+    Parameters: "advfirewall firewall add rule name=""{#MyAppName} TCP 8080-8090"" dir=in action=allow protocol=TCP localport=8080-8090 profile=any"; \
+    Flags: runhidden
 Filename: "{sys}\netsh.exe"; \
     Parameters: "advfirewall firewall add rule name=""{#MyAppName} UDP 5000-5020"" dir=in action=allow protocol=UDP localport=5000-5020 profile=any"; \
-    Flags: runhidden; Tasks: firewall
+    Flags: runhidden
 ; 安装完成后可选“立即运行”
 Filename: "{app}\{#MyAppExeName}"; \
     Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; \
@@ -143,3 +146,26 @@ Type: files; Name: "{app}\*.log"
 ; 自定义提示（中文环境更友好）
 chinese.FinishedLabel={#MyAppName} 已安装完成。%n%n程序目录：%1
 english.FinishedLabel={#MyAppName} has been installed.%n%nInstall folder: %1
+
+[Code]
+// ★ 装完复查：规则真的加上了才算成功；加不上就明确报错，绝不静默。
+//   背景：客户机上「App 搜不到 + 手输 IP 也不通 + 接收端一包没收到」，
+//        根因就是规则没加上而安装器毫无提示。
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    if (not Exec(ExpandConstant('{sys}\netsh.exe'),
+        'advfirewall firewall show rule name="VRCReceiver UDP 5000-5020"',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
+    begin
+      MsgBox('防火墙放行规则没有添加成功！' + #13#10 + #13#10 +
+             '其它设备将无法自动搜索到本机，也无法连接。' + #13#10 + #13#10 +
+             '请右键安装包 → 「以管理员身份运行」重新安装；' + #13#10 +
+             '或在 Windows 防火墙中手动放行 UDP 5000-5020 与 TCP 8080-8090。',
+             mbError, MB_OK);
+    end;
+  end;
+end;

@@ -15,7 +15,9 @@
 from PyInstaller.utils.hooks import collect_submodules
 
 hiddenimports = collect_submodules("pyvirtualcam") + ["i18n", "vrc_protocol",
-                                                      "cv2_shim"]
+                                                      "cv2_shim", "frame_core",
+                                                      "frame_tab", "paramiko",
+                                                      "log_i18n"]
 
 excludes = [
     "cv2",
@@ -43,7 +45,9 @@ a = Analysis(
     ["vrc_receiver.py"],
     pathex=[],
     binaries=[],
-    datas=[("i18n.py", "."), ("vrc_protocol.py", "."), ("cv2_shim.py", ".")],
+    datas=[("i18n.py", "."), ("vrc_protocol.py", "."), ("cv2_shim.py", "."),
+           # Steam Frame 选项卡要用：上传到头显的两个发送端脚本（resource_path 取）
+           ("frame_sender.py", "."), ("uvc_bulk_sender.py", ".")],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

@@ -13,6 +13,7 @@ import os
 import sys
 
 LANG = "en"
+FOLLOW_SYSTEM = False      # True = 语言跟随系统（未手动指定）
 
 # 语言包: key -> {lang: text}
 STRINGS = {
@@ -102,6 +103,25 @@ STRINGS = {
         "ja": "新しい配信を検出: カメラ {sid}", "ko": "새 스트림 감지: 카메라 {sid}",
         "ru": "Обнаружен новый поток: камера {sid}",
     },
+    "spec_sent": {
+        "zh": "已下发规格：{spec}", "en": "Spec sent: {spec}",
+        "ja": "仕様を送信：{spec}", "ko": "사양 전송: {spec}", "ru": "Отправлено: {spec}",
+    },
+    "spec_wait": {
+        "zh": "等待设备上报规格…", "en": "Waiting for camera specs…",
+        "ja": "カメラ仕様を待機中…", "ko": "카메라 사양 대기 중…",
+        "ru": "Ожидание спецификаций…",
+    },
+    "spec_auto": {
+        "zh": "自动（设备未上报实际规格）", "en": "Auto (camera did not report)",
+        "ja": "自動（実際の仕様は未報告）", "ko": "자동 (사양 미보고)",
+        "ru": "Авто (не сообщено)",
+    },
+    "spec_no_addr": {
+        "zh": "该路还没收到画面，无法下发规格", "en": "No stream from this camera yet",
+        "ja": "まだ映像を受信していません", "ko": "아직 영상이 없습니다",
+        "ru": "Поток ещё не получен",
+    },
     # ---- 统计 ----
     "stats_line": {
         "zh": "{fps} fps · {mbps} Mbps · 迟到{late} 坏包{bad}",
@@ -150,6 +170,220 @@ STRINGS = {
         "ja": "配信ポート {want} は使用中のため、代わりに {got} を使用します。\n\nパネルのアドレスは新しいポートで表示されています。\n（別の VRCReceiver が {want} を使用している場合は終了を推奨）",
         "ko": "스트림 포트 {want} 이(가) 사용 중이라 {got} 으로 대체했습니다.\n\n패널의 주소는 새 포트로 표시되며 그대로 사용하면 됩니다.\n(다른 VRCReceiver 인스턴스가 {want} 을(를) 점유 중이면 종료를 권장)",
         "ru": "Порт {want} занят, используется {got}.\n\nАдреса на панели уже показаны с новым портом.\n(Если {want} занят другим экземпляром VRCReceiver, закройте его.)",
+    },
+    "fw_warn_missing": {
+        "zh": "防火墙未放行（缺少规则）—— 其它设备会搜不到、也连不上。请点右侧「一键修复」",
+        "en": "Firewall rules are missing — other devices cannot discover or connect. Click Fix now",
+        "ja": "ファイアウォールの許可設定がありません。他の端末から検出・接続できません。「今すぐ修復」を押してください",
+        "ko": "방화벽 허용 규칙이 없습니다. 다른 기기에서 검색·연결할 수 없습니다. '지금 수정'을 누르세요",
+        "ru": "Правил брандмауэра нет — другие устройства не найдут и не подключатся. Нажмите «Исправить»",
+    },
+    "fw_warn_block": {
+        "zh": "检测到阻止本程序的防火墙规则：{name} —— 其它设备连不上。请点「一键修复」",
+        "en": "A firewall rule blocks this app: {name} — other devices cannot connect. Click Fix now",
+        "ja": "このアプリを遮断する規則があります: {name}。「今すぐ修復」を押してください",
+        "ko": "이 앱을 차단하는 규칙이 있습니다: {name}. '지금 수정'을 누르세요",
+        "ru": "Правило блокирует приложение: {name}. Нажмите «Исправить»",
+    },
+    "fw_fix_btn": {
+        "zh": "一键修复", "en": "Fix now", "ja": "今すぐ修復",
+        "ko": "지금 수정", "ru": "Исправить",
+    },
+    "fw_fixing": {
+        "zh": "正在修复…", "en": "Fixing...", "ja": "修復中…",
+        "ko": "수정 중…", "ru": "Исправление…",
+    },
+    "fw_ok": {
+        "zh": "防火墙已放行 ✓", "en": "Firewall OK ✓",
+        "ja": "ファイアウォール設定 OK ✓", "ko": "방화벽 허용됨 ✓",
+        "ru": "Брандмауэр настроен ✓",
+    },
+    "fw_failed": {
+        "zh": "未修复成功：可能取消了管理员确认，或当前账号不是管理员（需手动放行）",
+        "en": "Fix failed: admin prompt cancelled or no admin rights (add the rule manually)",
+        "ja": "修復できませんでした（管理者確認の取消、または管理者権限なし）",
+        "ko": "수정 실패: 관리자 확인 취소 또는 관리자 권한 없음",
+        "ru": "Не удалось: отменён запрос администратора или нет прав",
+    },
+    "tab_receiver": {
+        "zh": "接收端", "en": "Receiver", "ja": "受信", "ko": "수신", "ru": "Приём",
+    },
+    "tab_frame": {
+        "zh": "Steam Frame 安装", "en": "Steam Frame Setup",
+        "ja": "Steam Frame セットアップ", "ko": "Steam Frame 설치",
+        "ru": "Установка Steam Frame",
+    },
+    "frm_title": {
+        "zh": "Steam Frame 侧 VRCForward 安装", "en": "Install VRCForward on Steam Frame",
+        "ja": "Steam Frame 側に VRCForward をインストール", "ko": "Steam Frame 측 VRCForward 설치",
+        "ru": "Установка VRCForward на Steam Frame",
+    },
+    "frm_hint": {
+        "zh": "头显与 PC 连同一个局域网；输入头显的开机密码（默认用户 steamos）。程序会自动装驱动和发送端，并设为开机自启。",
+        "en": "Connect the headset and PC to the same LAN. Enter the headset login password (user: steamos). The driver and sender are installed and enabled at boot automatically.",
+        "ja": "ヘッドセットと PC を同じ LAN に接続し、ログインパスワード（ユーザー: steamos）を入力してください。ドライバと送信側を自動で導入し、自動起動に設定します。",
+        "ko": "헤드셋과 PC를 같은 LAN에 연결하고 로그인 비밀번호(사용자: steamos)를 입력하세요. 드라이버와 송신기를 자동 설치하고 부팅 시 자동 실행으로 설정합니다.",
+        "ru": "Подключите шлем и ПК к одной локальной сети и введите пароль (пользователь: steamos). Драйвер и отправитель установятся и добавятся в автозапуск.",
+    },
+    "frm_ip": {
+        "zh": "头显地址", "en": "Headset IP", "ja": "ヘッドセット IP",
+        "ko": "헤드셋 IP", "ru": "IP шлема",
+    },
+    "frm_user": {
+        "zh": "用户名", "en": "User", "ja": "ユーザー名",
+        "ko": "사용자 이름", "ru": "Пользователь",
+    },
+    "frm_user_tip": {
+        "zh": "头显的登录用户名，默认 steamos。如果自己改过用户名，请在此填写。",
+        "en": "Headset login user name (default: steamos). Change it if you renamed the account.",
+        "ja": "ヘッドセットのログインユーザー名（既定: steamos）。変更している場合は入力してください。",
+        "ko": "헤드셋 로그인 사용자 이름(기본: steamos). 계정 이름을 바꿨다면 입력하세요.",
+        "ru": "Имя пользователя шлема (по умолчанию steamos). Укажите, если меняли.",
+    },
+    "frm_pwd": {
+        "zh": "密码", "en": "Password", "ja": "パスワード",
+        "ko": "비밀번호", "ru": "Пароль",
+    },
+    "frm_pwd_hint": {
+        "zh": "头显登录密码（不会保存）", "en": "Headset login password (not saved)",
+        "ja": "ログインパスワード（保存されません）", "ko": "로그인 비밀번호(저장 안 함)",
+        "ru": "Пароль входа (не сохраняется)",
+    },
+    "frm_scan": {
+        "zh": "自动查找", "en": "Auto-detect", "ja": "自動検出",
+        "ko": "자동 찾기", "ru": "Найти",
+    },
+    "frm_install": {
+        "zh": "开始安装", "en": "Install", "ja": "インストール",
+        "ko": "설치 시작", "ru": "Установить",
+    },
+    "frm_idle": {
+        "zh": "就绪", "en": "Ready", "ja": "準備完了", "ko": "준비됨",
+        "ru": "Готово",
+    },
+    "frm_scanning": {
+        "zh": "正在扫描局域网…", "en": "Scanning LAN...", "ja": "LAN をスキャン中…",
+        "ko": "LAN 검색 중…", "ru": "Поиск в локальной сети…",
+    },
+    "frm_installing": {
+        "zh": "正在安装…（请勿关闭）", "en": "Installing... (do not close)",
+        "ja": "インストール中…（閉じないでください）",
+        "ko": "설치 중…(닫지 마세요)", "ru": "Установка… (не закрывайте)",
+    },
+    "frm_scan_none": {
+        "zh": "没找到设备：确认头显已连同一局域网，或直接输入它的 IP",
+        "en": "No device found: check the headset is on the same LAN, or type its IP",
+        "ja": "見つかりません。同じ LAN か IP を直接入力してください",
+        "ko": "찾지 못했습니다. 같은 LAN인지 확인하거나 IP를 직접 입력하세요",
+        "ru": "Не найдено: проверьте одну локальную сеть или введите IP вручную",
+    },
+    "frm_scan_ok": {
+        "zh": "找到 {n} 台：{ip}", "en": "{n} device(s) found: {ip}",
+        "ja": "{n} 台見つかりました: {ip}", "ko": "{n}대 발견: {ip}",
+        "ru": "Найдено устройств: {n} ({ip})",
+    },
+    "frm_need_ip": {
+        "zh": "请先填头显地址（或点自动查找）", "en": "Enter the headset IP first",
+        "ja": "先に IP を入力してください", "ko": "먼저 헤드셋 IP를 입력하세요",
+        "ru": "Сначала укажите IP шлема",
+    },
+    "frm_need_pwd": {
+        "zh": "请先填密码", "en": "Enter the password first",
+        "ja": "先にパスワードを入力してください", "ko": "먼저 비밀번호를 입력하세요",
+        "ru": "Сначала введите пароль",
+    },
+    "frm_device": {
+        "zh": "已连接 {host} · 内核 {kernel} · 驱动{drv}",
+        "en": "Connected {host} · kernel {kernel} · driver {drv}",
+        "ja": "{host} に接続 · カーネル {kernel} · ドライバ {drv}",
+        "ko": "{host} 연결됨 · 커널 {kernel} · 드라이버 {drv}",
+        "ru": "Подключено {host} · ядро {kernel} · драйвер {drv}",
+    },
+    "frm_drv_ok": {
+        "zh": "已加载", "en": "loaded", "ja": "読み込み済み",
+        "ko": "로드됨", "ru": "загружен",
+    },
+    "frm_drv_no": {
+        "zh": "未安装", "en": "missing", "ja": "未導入",
+        "ko": "없음", "ru": "нет",
+    },
+    "frm_done": {
+        "zh": "安装完成，插上相机几秒后出画面", "en": "Done — picture appears a few seconds after plugging in the camera",
+        "ja": "完了。カメラを接続すると数秒で映像が出ます", "ko": "완료. 카메라를 연결하면 몇 초 후 영상이 나옵니다",
+        "ru": "Готово. Изображение появится через несколько секунд после подключения камеры",
+    },
+    "frm_fail": {
+        "zh": "安装未完成", "en": "Setup did not finish", "ja": "セットアップ未完了",
+        "ko": "설치 미완료", "ru": "Установка не завершена",
+    },
+    "frm_uninstall": {
+        "zh": "卸载", "en": "Uninstall",
+        "ja": "アンインストール", "ko": "제거",
+        "ru": "Удалить",
+    },
+    "frm_uninstall_confirm": {
+        "zh": "只卸载 UVC 驱动与相机转发（服务+脚本），构建环境保留。\n\n确定卸载吗？",
+        "en": "This removes the UVC driver and the camera sender (service + scripts). Build tools are kept.\n\nUninstall now?",
+        "ja": "UVC ドライバと送信機能（サービス+スクリプト）のみ削除します。ビルド環境は残ります。\n\n実行しますか？",
+        "ko": "UVC 드라이버와 카메라 송신(서비스+스크립트)만 제거합니다. 빌드 환경은 유지됩니다.\n\n제거할까요?",
+        "ru": "Удаляются драйвер UVC и отправитель (служба и скрипты). Средства сборки остаются.\n\nУдалить?",
+    },
+    "frm_uninstalling": {
+        "zh": "正在卸载…", "en": "Uninstalling...", "ja": "アンインストール中…",
+        "ko": "제거 중…", "ru": "Удаление…",
+    },
+    "frm_uninstall_done": {
+        "zh": "已卸载（构建环境保留）", "en": "Uninstalled (build tools kept)",
+        "ja": "削除しました（ビルド環境は保持）", "ko": "제거 완료(빌드 환경 유지)",
+        "ru": "Удалено (средства сборки сохранены)",
+    },
+    "frm_purge_env": {
+        "zh": "同时卸载构建环境", "en": "Also remove build tools",
+        "ja": "ビルド環境も削除", "ko": "빌드 환경도 제거",
+        "ru": "Также удалить средства сборки",
+    },
+    "frm_purge_env_tip": {
+        "zh": "勾选后一并移除本程序装过的构建依赖（gcc/make 等）。带共享库的包（curl/zstd/kmod/python）始终保留，避免影响系统。",
+        "en": "Also removes build packages this app installed (gcc/make etc.). Library packages (curl/zstd/kmod/python) are always kept.",
+        "ja": "本アプリが入れたビルド用パッケージ（gcc/make など）も削除します。共有ライブラリのパッケージ（curl/zstd/kmod/python）は常に残します。",
+        "ko": "이 앱이 설치한 빌드 패키지(gcc/make 등)도 제거합니다. 공유 라이브러리 패키지(curl/zstd/kmod/python)는 항상 유지합니다.",
+        "ru": "Удаляет пакеты сборки, установленные этим приложением (gcc/make и др.). Пакеты с библиотеками (curl/zstd/kmod/python) сохраняются.",
+    },
+    "frm_uninstall_confirm_purge": {
+        "zh": "将卸载 UVC 驱动与相机转发（服务+脚本），并回收本程序装过的构建环境（gcc/make 等）。\n\n确定卸载吗？",
+        "en": "Removes the UVC driver and camera sender (service + scripts), and also the build packages this app installed (gcc/make etc.).\n\nUninstall now?",
+        "ja": "UVC ドライバと送信機能（サービス+スクリプト）に加え、本アプリが入れたビルド環境（gcc/make など）も削除します。\n\n実行しますか？",
+        "ko": "UVC 드라이버와 카메라 송신(서비스+스크립트)을 제거하고, 이 앱이 설치한 빌드 환경(gcc/make 등)도 회수합니다.\n\n제거할까요?",
+        "ru": "Удаляются драйвер UVC и отправитель (служба и скрипты), а также пакеты сборки, установленные приложением (gcc/make и др.).\n\nУдалить?",
+    },
+    "frm_uninstall_done_purge": {
+        "zh": "已卸载（含构建环境）", "en": "Uninstalled (build tools removed)",
+        "ja": "削除しました（ビルド環境も削除）", "ko": "제거 완료(빌드 환경 포함)",
+        "ru": "Удалено (включая средства сборки)",
+    },
+    "lang_auto": {
+        "zh": "跟随系统", "en": "System", "ja": "システムに従う",
+        "ko": "시스템 설정", "ru": "Как в системе",
+    },
+    "lang_title": {
+        "zh": "语言", "en": "Language", "ja": "言語", "ko": "언어", "ru": "Язык",
+    },
+    "lang_restart": {
+        "zh": "语言已保存，程序将自动重启以生效。",
+        "en": "Language saved. The app will restart now to apply it.",
+        "ja": "言語を保存しました。反映のため再起動します。",
+        "ko": "언어가 저장되었습니다. 적용을 위해 다시 시작합니다.",
+        "ru": "Язык сохранён. Приложение перезапустится.",
+    },
+    "hint_auto_ok": {
+        "zh": "自动搜索 OK · 已应答 {n} 次", "en": "Auto-detect OK · answered {n}x",
+        "ja": "自動検出 OK · 応答 {n} 回", "ko": "자동 검색 OK · 응답 {n}회",
+        "ru": "Автоопределение OK · ответов: {n}",
+    },
+    "hint_auto_waiting": {
+        "zh": "自动搜索 OK · 尚未收到查询", "en": "Auto-detect OK · no query yet",
+        "ja": "自動検出 OK · 問い合わせ待ち", "ko": "자동 검색 OK · 질의 대기 중",
+        "ru": "Автоопределение OK · запросов пока нет",
     },
     "bridge_port_busy": {
         "zh": "拉流端口 {port} 及后续 10 个端口都被占用，拉流地址将不可用！\n\n常见原因：另一个 VRCReceiver 实例已在运行，或该端口被其它软件占用。\n请关闭占用者后重启本程序。",
@@ -218,3 +452,27 @@ def init(lang=None):
     """初始化: 显式语言 > 跟随系统 > 英语兜底"""
     set_lang(lang if lang else detect_lang())
     return LANG
+
+
+# ---------------------------------------------------------------------
+#  语言列表（供界面手动切换） + 远端日志翻译入口
+# ---------------------------------------------------------------------
+LANGS = ("zh", "en", "ja", "ko", "ru")
+LANG_NAMES = {
+    "zh": "中文",
+    "en": "English",
+    "ja": "日本語",
+    "ko": "한국어",
+    "ru": "Русский",
+}
+
+
+def log_line(line: str) -> str:
+    """远端安装脚本日志：中文界面原样输出，其它语言走英文兜底。"""
+    if LANG == "zh" or not line:
+        return line
+    try:
+        import log_i18n
+        return log_i18n.translate(line)
+    except Exception:
+        return line
